@@ -1,0 +1,205 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(schoolId) {
+      return /databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid);
+    }
+
+    function member(schoolId) {
+      return get(memberPath(schoolId)).data;
+    }
+
+    function activeMember(schoolId) {
+      return signedIn()
+        && exists(memberPath(schoolId))
+        && member(schoolId).status == 'ACTIVE';
+    }
+
+    function hasPermission(schoolId, permission) {
+      return activeMember(schoolId)
+        && member(schoolId).permissions is list
+        && permission in member(schoolId).permissions;
+    }
+
+    function privilegedRole(schoolId) {
+      return activeMember(schoolId)
+        && member(schoolId).role in [
+          'SCHOOL_ADMIN',
+          'REGISTRAR',
+          'ATTENDANCE_OFFICER',
+          'AUDITOR'
+        ];
+    }
+
+    function sectionAllowed(schoolId, sectionId) {
+      return privilegedRole(schoolId)
+        || (
+          sectionId is string
+          && member(schoolId).allowedSectionIds is list
+          && sectionId in member(schoolId).allowedSectionIds
+        );
+    }
+
+    function ownsDevice() {
+      return resource.data.ownerUid == request.auth.uid
+        || resource.data.registeredByUid == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+
+    match /schools/{schoolId} {
+      allow get: if activeMember(schoolId);
+      allow list, create, update, delete: if false;
+
+      match /members/{uid} {
+        allow get: if activeMember(schoolId)
+          && (request.auth.uid == uid || hasPermission(schoolId, 'user.read'));
+        allow list: if hasPermission(schoolId, 'user.read');
+        allow create, update, delete: if false;
+      }
+
+      match /invitations/{invitationId} {
+        allow read, write: if false;
+      }
+
+      match /academicYears/{documentId} {
+        allow read: if activeMember(schoolId);
+        allow write: if false;
+      }
+
+      match /gradeLevels/{documentId} {
+        allow read: if activeMember(schoolId);
+        allow write: if false;
+      }
+
+      match /sections/{documentId} {
+        allow get: if activeMember(schoolId)
+          && (privilegedRole(schoolId) || sectionAllowed(schoolId, documentId));
+        allow list: if activeMember(schoolId);
+        allow write: if false;
+      }
+
+      match /students/{studentId} {
+        allow get, list: if hasPermission(schoolId, 'student.read')
+          && sectionAllowed(schoolId, resource.data.sectionId);
+        allow create, update, delete: if false;
+      }
+
+      match /guardians/{guardianId} {
+        allow get, list: if hasPermission(schoolId, 'guardian.read')
+          && privilegedRole(schoolId);
+        allow create, update, delete: if false;
+      }
+
+      match /studentGuardianLinks/{linkId} {
+        allow get, list: if hasPermission(schoolId, 'guardian.read')
+          && (
+            privilegedRole(schoolId)
+            || sectionAllowed(schoolId, resource.data.sectionId)
+          );
+        allow create, update, delete: if false;
+      }
+
+      match /enrollments/{enrollmentId} {
+        allow get, list: if hasPermission(schoolId, 'student.read')
+          && sectionAllowed(schoolId, resource.data.sectionId);
+        allow create, update, delete: if false;
+      }
+
+      match /nfcCards/{cardId} {
+        allow get, list: if hasPermission(schoolId, 'nfc.read')
+          && sectionAllowed(schoolId, resource.data.sectionId);
+        allow create, update, delete: if false;
+      }
+
+      match /cardReservations/{reservationId} {
+        allow read, write: if false;
+      }
+
+      match /devices/{deviceId} {
+        allow get: if activeMember(schoolId)
+          && (
+            ownsDevice()
+            || (hasPermission(schoolId, 'device.read') && privilegedRole(schoolId))
+          );
+        allow list: if hasPermission(schoolId, 'device.read')
+          && privilegedRole(schoolId);
+        allow create, update, delete: if false;
+      }
+
+      match /deviceLeases/{leaseId} {
+        allow read, write: if false;
+      }
+
+      match /scannerSessions/{sessionId} {
+        allow get: if activeMember(schoolId)
+          && (
+            resource.data.teacherUid == request.auth.uid
+            || (hasPermission(schoolId, 'attendance.read') && privilegedRole(schoolId))
+          );
+        allow list: if hasPermission(schoolId, 'attendance.read')
+          && privilegedRole(schoolId);
+        allow create, update, delete: if false;
+      }
+
+      match /attendanceEvents/{eventId} {
+        allow get, list: if hasPermission(schoolId, 'attendance.read')
+          && sectionAllowed(schoolId, resource.data.sectionId);
+        allow create, update, delete: if false;
+      }
+
+      match /attendanceDays/{attendanceDayId} {
+        allow get, list: if hasPermission(schoolId, 'attendance.read')
+          && sectionAllowed(schoolId, resource.data.sectionId);
+        allow create, update, delete: if false;
+      }
+
+      match /attendanceCorrections/{correctionId} {
+        allow get, list: if hasPermission(schoolId, 'attendance.read')
+          && sectionAllowed(schoolId, resource.data.sectionId);
+        allow create, update, delete: if false;
+      }
+
+      match /smsTemplates/{templateId} {
+        allow read: if activeMember(schoolId);
+        allow write: if false;
+      }
+
+      match /smsMessages/{messageId} {
+        allow get, list: if hasPermission(schoolId, 'sms.read')
+          && privilegedRole(schoolId);
+        allow create, update, delete: if false;
+      }
+
+      match /syncBatches/{batchId} {
+        allow read, write: if false;
+      }
+
+      match /auditLogs/{auditId} {
+        allow get, list: if hasPermission(schoolId, 'audit.read')
+          && privilegedRole(schoolId);
+        allow create, update, delete: if false;
+      }
+
+      match /settings/{settingId} {
+        allow get, list: if activeMember(schoolId);
+        allow create, update, delete: if false;
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

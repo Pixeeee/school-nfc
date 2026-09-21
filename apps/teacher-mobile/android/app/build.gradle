@@ -1,0 +1,30 @@
+
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.devtools.ksp'
+}
+android {
+    namespace 'com.pixeeee.schoolnfc'
+    compileSdk 35
+    defaultConfig { applicationId 'com.pixeeee.schoolnfc'; minSdk 26; targetSdk 35; versionCode 1; versionName '1.0.0'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
+    buildFeatures { buildConfig true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    kotlinOptions { jvmTarget = '17' }
+}
+dependencies {
+    implementation platform('com.google.firebase:firebase-bom:34.3.0')
+    implementation 'com.google.firebase:firebase-auth'
+    implementation 'com.google.firebase:firebase-functions'
+    implementation 'com.google.firebase:firebase-appcheck-playintegrity'
+    debugImplementation 'com.google.firebase:firebase-appcheck-debug'
+    implementation 'androidx.room:room-runtime:2.7.2'
+    implementation 'androidx.room:room-ktx:2.7.2'
+    ksp 'androidx.room:room-compiler:2.7.2'
+    implementation 'androidx.work:work-runtime-ktx:2.10.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2'
+    implementation 'com.google.code.gson:gson:2.13.1'
+
+    implementation project(':capacitor-android')
+}

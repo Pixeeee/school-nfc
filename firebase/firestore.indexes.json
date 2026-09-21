@@ -1,0 +1,287 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "students",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sectionId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "displayName",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "students",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "displayName",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attendanceEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "localSchoolDate",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "localTimestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attendanceEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sectionId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "localSchoolDate",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "localTimestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "smsMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "nfcCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "devices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastSeenAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "studentGuardianLinks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "studentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "guardianId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "studentGuardianLinks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "guardianId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "studentId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "students",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sectionId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "nfcCards",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sectionId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attendanceEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sectionId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "localSchoolDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attendanceEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "studentId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "localSchoolDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attendanceEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "eventUuid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "attendanceDays",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sectionId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "localSchoolDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "smsMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "auditLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "nfcCards",
+      "fieldPath": "tokenHash",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "nfcCards",
+      "fieldPath": "tagUidHash",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "guardians",
+      "fieldPath": "phoneE164",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "smsMessages",
+      "fieldPath": "renderedMessage",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "auditLogs",
+      "fieldPath": "before",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "auditLogs",
+      "fieldPath": "after",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "smsMessages",
+      "fieldPath": "lastErrorMessage",
+      "indexes": []
+    }
+  ]
+}

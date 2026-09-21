@@ -1,0 +1,85 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(schoolId) {
+      return /databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid);
+    }
+
+    function member(schoolId) {
+      return firestore.get(memberPath(schoolId)).data;
+    }
+
+    function activeMember(schoolId) {
+      return signedIn()
+        && firestore.exists(memberPath(schoolId))
+        && member(schoolId).status == 'ACTIVE';
+    }
+
+    function hasPermission(schoolId, permission) {
+      return activeMember(schoolId)
+        && member(schoolId).permissions is list
+        && permission in member(schoolId).permissions;
+    }
+
+    function privilegedRole(schoolId) {
+      return activeMember(schoolId)
+        && member(schoolId).role in [
+          'SCHOOL_ADMIN',
+          'REGISTRAR',
+          'ATTENDANCE_OFFICER',
+          'AUDITOR'
+        ];
+    }
+
+    function studentPath(schoolId, studentId) {
+      return /databases/(default)/documents/schools/$(schoolId)/students/$(studentId);
+    }
+
+    function studentSectionAllowed(schoolId, studentId) {
+      return firestore.exists(studentPath(schoolId, studentId))
+        && (
+          privilegedRole(schoolId)
+          || (
+            member(schoolId).allowedSectionIds is list
+            && firestore.get(studentPath(schoolId, studentId)).data.sectionId
+              in member(schoolId).allowedSectionIds
+          )
+        );
+    }
+
+    function validStudentImage() {
+      return request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType in [
+          'image/jpeg',
+          'image/png',
+          'image/webp'
+        ];
+    }
+
+    match /schools/{schoolId}/students/{studentId}/{fileName} {
+      allow read: if hasPermission(schoolId, 'student.read')
+        && studentSectionAllowed(schoolId, studentId);
+      allow create, update: if hasPermission(schoolId, 'student.update')
+        && studentSectionAllowed(schoolId, studentId)
+        && validStudentImage()
+        && fileName.matches('^[A-Za-z0-9._-]{1,128}$');
+      allow delete: if hasPermission(schoolId, 'student.update')
+        && studentSectionAllowed(schoolId, studentId);
+    }
+
+    match /schools/{schoolId}/exports/{fileName} {
+      allow read: if hasPermission(schoolId, 'report.export')
+        && privilegedRole(schoolId);
+      allow write: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

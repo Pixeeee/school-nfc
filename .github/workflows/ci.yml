@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-functions-and-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm security:check
+      - run: pnpm test:rules
+      - name: Production dependency audit
+        run: pnpm audit --prod --audit-level high
+      - name: Check repository diff
+        run: git diff --check
+
+  android-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - run: pnpm install --frozen-lockfile
+      - name: Supply CI Firebase configuration
+        working-directory: apps/teacher-mobile/android/app
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > google-services.json
+          else
+            echo 'Firebase Android configuration secret is not present; native compile remains available because the plugin is conditional.'
+          fi
+      - run: pnpm --filter @school-nfc/teacher-mobile build
+      - run: pnpm --filter @school-nfc/teacher-mobile exec cap sync android
+      - name: Android unit tests and debug APK
+        working-directory: apps/teacher-mobile/android
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: school-nfc-debug-apk
+          path: apps/teacher-mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

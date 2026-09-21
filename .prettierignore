@@ -1,0 +1,9 @@
+node_modules
+.pnpm-store
+.turbo
+dist
+build
+coverage
+apps/teacher-mobile/android
+reports
+pnpm-lock.yaml

@@ -1,0 +1,53 @@
+# Dependencies and build output
+node_modules/
+.pnpm-store/
+.turbo/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+service-account*.json
+*service-account*.json
+firebase-adminsdk*.json
+.google-application-credentials.json
+
+# Firebase local state
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+.firebaserc
+
+# Android local and sensitive files
+apps/teacher-mobile/android/.gradle/
+apps/teacher-mobile/android/local.properties
+apps/teacher-mobile/android/app/google-services.json
+apps/teacher-mobile/android/app/build/
+apps/teacher-mobile/android/build/
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Verification and temporary files
+reports/release-verification/logs/
+*.log
+*.exit
+security-review-source.txt
+integrity-patch-report.json
+
+reports/release-verification/

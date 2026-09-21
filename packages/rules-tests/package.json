@@ -1,0 +1,24 @@
+{
+  "name": "@school-nfc/rules-tests",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo rules-tests-no-build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"Rules tests are executed by pnpm test:rules with the Firebase Emulator Suite.\"",
+    "test:coverage": "vitest run --coverage --config vitest.config.ts",
+    "clean": "rm -rf coverage",
+    "test:emulator": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^12.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

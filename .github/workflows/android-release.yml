@@ -1,0 +1,62 @@
+name: Build Signed Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Release environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+      - run: pnpm install --frozen-lockfile
+      - name: Decode Firebase and signing material
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$GOOGLE_SERVICES_JSON_BASE64"
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > apps/teacher-mobile/android/app/google-services.json
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/school-nfc-release.jks"
+      - run: pnpm --filter @school-nfc/teacher-mobile build
+      - run: pnpm --filter @school-nfc/teacher-mobile exec cap sync android
+      - name: Build signed APK and AAB
+        working-directory: apps/teacher-mobile/android
+        env:
+          SCHOOL_NFC_KEYSTORE_PATH: ${{ runner.temp }}/school-nfc-release.jks
+          SCHOOL_NFC_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SCHOOL_NFC_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SCHOOL_NFC_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon clean testReleaseUnitTest assembleRelease bundleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: school-nfc-${{ inputs.environment }}-release
+          path: |
+            apps/teacher-mobile/android/app/build/outputs/apk/release/*.apk
+            apps/teacher-mobile/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 30

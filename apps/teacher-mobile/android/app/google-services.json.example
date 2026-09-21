@@ -1,0 +1,9 @@
+
+Do not edit this placeholder into a fake configuration.
+
+Firebase Console → Project settings → Your apps → Android app
+Package name: ph.schoolnfc.teacher
+Download google-services.json and place it at:
+apps/teacher-mobile/android/app/google-services.json
+
+Never commit the real file if the repository's deployment policy treats environment configuration as private.

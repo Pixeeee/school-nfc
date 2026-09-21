@@ -1,0 +1,39 @@
+{
+  "name": "school-nfc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline-first NFC student attendance and parent SMS platform",
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "test:rules": "firebase emulators:exec --project demo-school-nfc --only firestore,storage \"pnpm --filter @school-nfc/rules-tests test:emulator\"",
+    "verify": "bash scripts/release-verify.sh",
+    "security:check": "node scripts/security-check.mjs",
+    "emulators": "firebase emulators:start",
+    "deploy:staging": "node scripts/require-env.mjs staging && firebase use staging && firebase deploy",
+    "deploy:production": "node scripts/require-env.mjs production && firebase use production && firebase deploy",
+    "android:sync": "pnpm --filter @school-nfc/teacher-mobile cap:sync",
+    "android:open": "pnpm --filter @school-nfc/teacher-mobile cap:open",
+    "clean": "turbo run clean && rm -rf node_modules .turbo",
+    "bootstrap:platform-admin": "node scripts/set-platform-admin.mjs",
+    "bootstrap:school": "node scripts/bootstrap-school.mjs",
+    "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "firebase-tools": "^14.15.2",
+    "turbo": "^2.5.6",
+    "typescript": "^5.9.2",
+    "firebase-admin": "^13.4.0",
+    "prettier": "^3.6.2"
+  }
+}

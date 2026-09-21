@@ -1,0 +1,13 @@
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Plus } from "lucide-react";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { createGuardianSchema } from "@school-nfc/contracts";
+import { useAuth } from "../auth/AuthProvider";
+import { DataTable } from "../components/DataTable";
+import { Banner, Button, Field, Modal, PageHeader, StatusBadge } from "../components/Ui";
+import { useSchoolCollection } from "../hooks/useSchoolCollection";
+import { callFunction } from "../lib/call";
+import { displayError } from "../lib/format";
+export function GuardiansPage(){const{schoolId}=useAuth();const data=useSchoolCollection<any>("guardians","displayName");const[open,setOpen]=useState(false);const[msg,setMsg]=useState<string|null>(null);const form=useForm<any>({resolver:zodResolver(createGuardianSchema),defaultValues:{schoolId:schoolId??"",phoneStatus:"UNVERIFIED",consentStatus:"PENDING"}});const submit=form.handleSubmit(async(v)=>{try{await callFunction("createGuardian",{...v,schoolId});setOpen(false);form.reset();}catch(e){setMsg(displayError(e));}});return <><PageHeader title="Guardians" description="Protected notification recipients and consent status." action={<Button onClick={()=>setOpen(true)}><Plus/> Add guardian</Button>}/>{msg&&<Banner onClose={()=>setMsg(null)}>{msg}</Banner>}<div className="card"><DataTable loading={data.loading} rows={data.items} columns={[{key:"name",header:"Guardian",render:r=><strong>{r.displayName}</strong>},{key:"phone",header:"Phone",render:r=>r.phoneMasked??"Protected"},{key:"verified",header:"Phone status",render:r=><StatusBadge value={r.phoneStatus}/>},{key:"consent",header:"Consent",render:r=><StatusBadge value={r.consentStatus}/>}]} /></div>{open&&<Modal title="Add guardian" onClose={()=>setOpen(false)}><form className="form-grid" onSubmit={submit}><Field label="Full name" error={form.formState.errors.displayName?.message}><input {...form.register("displayName")}/></Field><Field label="Mobile number" error={form.formState.errors.phone?.message}><input inputMode="tel" placeholder="09171234567" {...form.register("phone")}/></Field><Field label="Consent status"><select {...form.register("consentStatus")}><option value="PENDING">Pending</option><option value="RECORDED">Recorded</option><option value="WITHDRAWN">Withdrawn</option><option value="NOT_REQUIRED">Not required</option></select></Field><div className="form-actions"><Button type="button" variant="secondary" onClick={()=>setOpen(false)}>Cancel</Button><Button type="submit" busy={form.formState.isSubmitting}>Create guardian</Button></div></form></Modal>}</>}

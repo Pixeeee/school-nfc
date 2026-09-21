@@ -1,0 +1,62 @@
+name: Deploy Firebase
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Firebase environment
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: firebase-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - run: pnpm install --frozen-lockfile
+      - name: Write admin web environment
+        env:
+          ADMIN_WEB_ENV: ${{ secrets.ADMIN_WEB_ENV }}
+        run: printf '%s\n' "$ADMIN_WEB_ENV" > apps/admin-web/.env.production
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm security:check
+      - run: pnpm test:rules
+      - name: Deploy selected Firebase project
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          test -n "$FIREBASE_PROJECT_ID"
+          pnpm exec firebase deploy \
+            --project "$FIREBASE_PROJECT_ID" \
+            --only firestore:rules,firestore:indexes,storage,functions,hosting \
+            --non-interactive

@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "development": "replace-school-nfc-development",
+    "staging": "replace-school-nfc-staging",
+    "production": "replace-school-nfc-production"
+  }
+}
