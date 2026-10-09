@@ -4,19 +4,19 @@
 - Branch: `main`
 - Starting commit: `294d55b`
 
-| Check | Requirement | Result | Duration |
-|---|---:|---:|---:|
-| Frozen dependency installation | yes | FAIL (1) | 5s |
-| Formatting | yes | FAIL (1) | 0s |
-| Lint | yes | FAIL (1) | 6s |
-| TypeScript type check | yes | FAIL (1) | 0s |
-| Unit and integration tests | yes | FAIL (1) | 5s |
-| Production web/functions build | yes | FAIL (1) | 0s |
-| Static security gate | yes | FAIL (1) | 5s |
-| Git whitespace and conflict-marker check | yes | PASS | 0s |
-| Production dependency vulnerability audit | yes | FAIL (1) | 0s |
-| Firestore and Storage emulator rules tests | yes | FAIL (1) | 5s |
-| Android unit tests and debug APK | conditional | SKIPPED | 0s |
+| Check                                      | Requirement |   Result | Duration |
+| ------------------------------------------ | ----------: | -------: | -------: |
+| Frozen dependency installation             |         yes | FAIL (1) |       5s |
+| Formatting                                 |         yes | FAIL (1) |       0s |
+| Lint                                       |         yes | FAIL (1) |       6s |
+| TypeScript type check                      |         yes | FAIL (1) |       0s |
+| Unit and integration tests                 |         yes | FAIL (1) |       5s |
+| Production web/functions build             |         yes | FAIL (1) |       0s |
+| Static security gate                       |         yes | FAIL (1) |       5s |
+| Git whitespace and conflict-marker check   |         yes |     PASS |       0s |
+| Production dependency vulnerability audit  |         yes | FAIL (1) |       0s |
+| Firestore and Storage emulator rules tests |         yes | FAIL (1) |       5s |
+| Android unit tests and debug APK           | conditional |  SKIPPED |       0s |
 
 ## Evidence
 

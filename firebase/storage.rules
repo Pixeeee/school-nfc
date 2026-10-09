@@ -21,8 +21,8 @@ service firebase.storage {
 
     function hasPermission(schoolId, permission) {
       return activeMember(schoolId)
-        && member(schoolId).permissions is list
-        && permission in member(schoolId).permissions;
+        && member(schoolId).effectivePermissions is list
+        && permission in member(schoolId).effectivePermissions;
     }
 
     function privilegedRole(schoolId) {
@@ -44,9 +44,9 @@ service firebase.storage {
         && (
           privilegedRole(schoolId)
           || (
-            member(schoolId).allowedSectionIds is list
+            member(schoolId).sectionIds is list
             && firestore.get(studentPath(schoolId, studentId)).data.sectionId
-              in member(schoolId).allowedSectionIds
+              in member(schoolId).sectionIds
           )
         );
     }

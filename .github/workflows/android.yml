@@ -1,9 +1,13 @@
-
 name: Android validation
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['apps/teacher-mobile/**', 'packages/contracts/**', '.github/workflows/android.yml']
+    paths:
+      [
+        "apps/teacher-mobile/**",
+        "packages/contracts/**",
+        ".github/workflows/android.yml",
+      ]
 permissions: { contents: read }
 jobs:
   debug-build:
@@ -15,11 +19,16 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
+        with: { distribution: temurin, java-version: 21 }
       - uses: android-actions/setup-android@v3
       - run: pnpm install --frozen-lockfile
       - name: Configure Firebase Android app
-        run: echo '${{ secrets.GOOGLE_SERVICES_JSON_B64 }}' | base64 --decode > apps/teacher-mobile/android/app/google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 --decode > apps/teacher-mobile/android/app/google-services.json
+          fi
       - run: pnpm --filter @school-nfc/teacher-mobile android:debug
       - uses: actions/upload-artifact@v4
         with:

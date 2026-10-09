@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import com.pixeeee.schoolnfc.attendance.AttendanceRepository
 import com.pixeeee.schoolnfc.attendance.ScanOutcome
 import com.pixeeee.schoolnfc.cloud.CloudGateway
+import com.pixeeee.schoolnfc.cloud.bridgeResponse
 import com.pixeeee.schoolnfc.database.AppDatabase
 import com.pixeeee.schoolnfc.database.SmsOutboxEntity
 import com.pixeeee.schoolnfc.database.SyncOutboxEntity
@@ -42,6 +43,11 @@ import com.pixeeee.schoolnfc.security.CryptoManager
 import com.pixeeee.schoolnfc.workers.QueueScheduler
 import java.time.Instant
 import java.util.UUID
+import java.time.LocalDate
+import java.time.ZoneId
+import com.pixeeee.schoolnfc.attendance.AttendancePolicy
+import com.pixeeee.schoolnfc.database.SectionEntity
+import com.pixeeee.schoolnfc.sync.SnapshotSynchronizer
 
 @CapacitorPlugin(
     name = "SchoolNfc",
@@ -143,6 +149,74 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         call.resolve(JSObject().put("students", array))
     }
 
+    private fun teacherContext(): Map<String, Any?> = mapOf(
+        "schoolId" to requireNotNull(preferences.schoolId) { "Register this phone first." },
+        "deviceId" to preferences.deviceId, "leaseId" to requireNotNull(preferences.leaseId) { "Renew device authorization first." },
+    )
+
+    @PluginMethod fun listSections(call: PluginCall) = launch(call) {
+        val items = database.sections().all().filter { it.id in preferences.allowedSectionIds }
+        call.resolve(JSObject().put("sections", JSArray(items.map { JSObject().put("id", it.id).put("name", it.name) })))
+    }
+
+    @PluginMethod fun getTeacherSetup(call: PluginCall) = launch(call) {
+        val result = cloud.call("getTeacherSetup", teacherContext())
+        val sections = (result["sections"] as? List<*>)?.filterIsInstance<Map<*, *>>() ?: emptyList()
+        database.sections().upsert(sections.map { SectionEntity(it["id"].toString(), it["name"].toString()) })
+        preferences.allowedSectionIds = sections.map { it["id"].toString() }.toSet()
+        resolve(call, result)
+    }
+
+    @PluginMethod fun createSection(call: PluginCall) = launch(call) {
+        val result = cloud.call("createTeacherSection", teacherContext() + mapOf(
+            "requestId" to required(call, "requestId"), "name" to required(call, "name"),
+            "gradeLevelId" to required(call, "gradeLevelId"), "academicYearId" to required(call, "academicYearId"),
+        ))
+        cloud.renewLease(requireNotNull(preferences.schoolId))
+        SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
+        notifyListeners("deviceStateChanged", deviceState())
+        resolve(call, result)
+    }
+
+    @PluginMethod fun createStudent(call: PluginCall) = launch(call) {
+        val fields = listOf("requestId", "sectionId", "studentNumber", "firstName", "lastName", "parentName", "parentPhone").associateWith { required(call, it) }
+        val result = cloud.call("createTeacherStudent", teacherContext() + fields + mapOf(
+            "parentPhoneVerified" to (call.getBoolean("parentPhoneVerified") == true), "parentConsent" to (call.getBoolean("parentConsent") == true),
+        ))
+        SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
+        resolve(call, result)
+    }
+
+    @PluginMethod fun listSectionStudents(call: PluginCall) = launch(call) {
+        val sectionId = required(call, "sectionId")
+        require(sectionId in preferences.allowedSectionIds && preferences.leaseValid()) { "Section authorization is missing or expired." }
+        val date = LocalDate.now(ZoneId.of(preferences.schoolTimeZone)).toString()
+        val students = database.students().inSection(sectionId).map { student ->
+            val key = AttendancePolicy.key(requireNotNull(preferences.schoolId), student.id, date, "ARRIVAL")
+            val event = database.attendance().byIdempotencyKey(key)
+            val statuses = event?.let { database.smsOutbox().statusesForEvent(it.eventUuid) } ?: emptyList()
+            val smsStatus = when {
+                statuses.isEmpty() -> "NONE"
+                statuses.any { it == "FAILED_FINAL" || it == "FAILED_RETRYABLE" } -> "FAILED"
+                statuses.all { it == "DELIVERED" } -> "DELIVERED"
+                statuses.all { it == "SENT" || it == "DELIVERED" } -> "SENT"
+                else -> "QUEUED"
+            }
+            JSObject().put("id", student.id).put("displayName", student.displayName).put("studentNumber", student.studentNumber)
+                .put("sectionId", student.sectionId).put("present", event != null).put("smsStatus", smsStatus)
+                .put("syncStatus", event?.syncStatus)
+        }
+        call.resolve(JSObject().put("students", JSArray(students)).put("localSchoolDate", date))
+    }
+
+    @PluginMethod fun markPresent(call: PluginCall) = launch(call) {
+        val outcome = attendance.markPresent(requireNotNull(preferences.schoolId), required(call, "studentId"), required(call, "sectionId"))
+        onScan(outcome)
+        call.resolve(JSObject().put("status", outcome.status).put("localTimestamp", outcome.localTimestamp)
+            .put("eventUuid", outcome.eventUuid).put("studentId", outcome.studentId).put("displayName", outcome.displayName)
+            .put("eventType", outcome.eventType).put("reason", outcome.reason).put("smsQueued", outcome.smsQueued))
+    }
+
     @PluginMethod fun beginWriteCard(call: PluginCall) = launch(call) {
         val schoolId = required(call, "schoolId")
         val studentId = required(call, "studentId")
@@ -161,6 +235,8 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     }
 
     @PermissionCallback fun smsPermissionCallback(call: PluginCall) {
+        QueueScheduler.scheduleSms(context)
+        scope.launch { notifyListeners("deviceStateChanged", deviceState()) }
         call.resolve(JSObject().put("granted", getPermissionState("sms") == PermissionState.GRANTED))
     }
 
@@ -177,9 +253,14 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         call.resolve(JSObject().put("subscriptions", array))
     }
 
-    @PluginMethod fun selectSubscription(call: PluginCall) {
-        val id = call.getInt("subscriptionId") ?: return call.reject("Subscription ID is required.")
+    @PluginMethod fun selectSubscription(call: PluginCall) = launch(call) {
+        val id = requireNotNull(call.getInt("subscriptionId")) { "Subscription ID is required." }
+        require(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) { "Phone permission is required." }
+        val manager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+        require(manager.activeSubscriptionInfoList.orEmpty().any { it.subscriptionId == id }) { "Select an active SMS SIM." }
         preferences.selectedSubscriptionId = id
+        QueueScheduler.scheduleSms(context)
+        notifyListeners("deviceStateChanged", deviceState())
         call.resolve()
     }
 
@@ -269,7 +350,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     private fun required(call: PluginCall, key: String): String = call.getString(key)?.takeIf { it.isNotBlank() } ?: throw IllegalArgumentException("$key is required.")
 
     private fun resolve(call: PluginCall, map: Map<String, Any?>) {
-        val json = JSObject(); map.forEach { (key, value) -> json.put(key, value) }; call.resolve(json)
+        call.resolve(bridgeResponse(map))
     }
 
     private fun launch(call: PluginCall, block: suspend () -> Unit) {

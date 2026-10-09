@@ -8,6 +8,7 @@ import com.pixeeee.schoolnfc.database.CardEntity
 import com.pixeeee.schoolnfc.database.GuardianRouteEntity
 import com.pixeeee.schoolnfc.database.SmsTemplateEntity
 import com.pixeeee.schoolnfc.database.StudentEntity
+import com.pixeeee.schoolnfc.database.SectionEntity
 import com.pixeeee.schoolnfc.device.DevicePreferences
 import com.pixeeee.schoolnfc.security.CryptoManager
 
@@ -19,10 +20,11 @@ class SnapshotSynchronizer(
 ) {
     suspend fun refreshAll() {
         refreshConfig()
-        refreshKind("STUDENTS") { items -> database.students().upsert(items.mapNotNull(::student)) }
-        refreshKind("CARDS") { items -> database.cards().upsert(items.mapNotNull(::card)) }
-        refreshKind("GUARDIANS") { items -> database.guardianRoutes().upsert(items.mapNotNull(::guardianRoute)) }
-        refreshKind("TEMPLATES") { items -> database.smsTemplates().upsert(items.mapNotNull(::template)) }
+        refreshKind("SECTIONS") { items -> database.sections().clear(); database.sections().upsert(items.filter { it["active"] == true }.map { SectionEntity(it["id"].toString(), it["name"].toString()) }) }
+        refreshKind("STUDENTS") { items -> database.students().clear(); database.students().upsert(items.mapNotNull(::student)) }
+        refreshKind("CARDS") { items -> database.cards().clear(); database.cards().upsert(items.mapNotNull(::card)) }
+        refreshKind("GUARDIANS") { items -> database.guardianRoutes().clear(); database.guardianRoutes().upsert(items.mapNotNull(::guardianRoute)) }
+        refreshKind("TEMPLATES") { items -> database.smsTemplates().clear(); database.smsTemplates().upsert(items.mapNotNull(::template)) }
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -31,6 +33,7 @@ class SnapshotSynchronizer(
         val first = (result["items"] as? List<Map<String, Any?>>)?.firstOrNull() ?: return
         val school = first["school"] as? Map<String, Any?> ?: return
         preferences.schoolName = school["name"]?.toString()
+        preferences.schoolTimeZone = school["timeZone"]?.toString() ?: "Asia/Manila"
         preferences.schoolPublicCode = school["publicCode"]?.toString()
     }
 
@@ -38,13 +41,16 @@ class SnapshotSynchronizer(
     private suspend fun refreshKind(kind: String, consume: suspend (List<Map<String, Any?>>) -> Unit) {
         var cursor: String? = null
         var pages = 0
+        val snapshot = mutableListOf<Map<String, Any?>>()
         do {
             val result = cloud.getSnapshot(kind, cursor)
             val items = result["items"] as? List<Map<String, Any?>> ?: emptyList()
-            consume(items)
+            snapshot.addAll(items)
             cursor = result["nextCursor"]?.toString()?.takeIf { it != "null" }
             pages += 1
         } while (cursor != null && pages < 100)
+        require(cursor == null) { "Snapshot is too large; cached data was preserved." }
+        database.withTransaction { consume(snapshot) }
     }
 
     private fun student(m: Map<String, Any?>): StudentEntity? = runCatching { StudentEntity(

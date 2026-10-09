@@ -21,8 +21,8 @@ service cloud.firestore {
 
     function hasPermission(schoolId, permission) {
       return activeMember(schoolId)
-        && member(schoolId).permissions is list
-        && permission in member(schoolId).permissions;
+        && member(schoolId).effectivePermissions is list
+        && permission in member(schoolId).effectivePermissions;
     }
 
     function privilegedRole(schoolId) {
@@ -39,14 +39,13 @@ service cloud.firestore {
       return privilegedRole(schoolId)
         || (
           sectionId is string
-          && member(schoolId).allowedSectionIds is list
-          && sectionId in member(schoolId).allowedSectionIds
+          && member(schoolId).sectionIds is list
+          && sectionId in member(schoolId).sectionIds
         );
     }
 
     function ownsDevice() {
-      return resource.data.ownerUid == request.auth.uid
-        || resource.data.registeredByUid == request.auth.uid;
+      return resource.data.assignedUserId == request.auth.uid;
     }
 
     match /users/{uid} {

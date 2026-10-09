@@ -4,13 +4,13 @@ A production-oriented, offline-first school attendance platform. Authorized staf
 
 ## Applications
 
-| Application | Purpose |
-|---|---|
-| `apps/admin-web` | Responsive school administration portal |
-| `apps/teacher-mobile` | React/Capacitor teacher UI plus native Android NFC/SMS implementation |
-| `apps/functions` | Trusted Firebase callable functions and ingestion boundary |
-| `packages/contracts` | Shared schemas, domain rules, idempotency, phone and NFC utilities |
-| `packages/rules-tests` | Firestore and Storage Rules emulator tests |
+| Application            | Purpose                                                               |
+| ---------------------- | --------------------------------------------------------------------- |
+| `apps/admin-web`       | Responsive school administration portal                               |
+| `apps/teacher-mobile`  | React/Capacitor teacher UI plus native Android NFC/SMS implementation |
+| `apps/functions`       | Trusted Firebase callable functions and ingestion boundary            |
+| `packages/contracts`   | Shared schemas, domain rules, idempotency, phone and NFC utilities    |
+| `packages/rules-tests` | Firestore and Storage Rules emulator tests                            |
 
 ## Critical architecture
 
@@ -52,7 +52,7 @@ See [`SECURITY.md`](SECURITY.md), [`docs/SECURITY_CHECKLIST.md`](docs/SECURITY_C
 - Node.js 22+
 - pnpm 10.17.1
 - Java 21 for Firebase Emulator/Functions checks
-- Java 17 and Android SDK for Android builds
+- Java 21 and Android SDK for Android builds
 - Firebase CLI
 - Android phone with NFC and an SMS-capable SIM
 - NDEF-compatible NFC cards, such as NTAG213/215/216
@@ -173,3 +173,15 @@ Register this exact Android application ID in every Firebase environment.
 ## License
 
 See [`LICENSE`](LICENSE).
+
+## Teacher roll call and prepaid SIM SMS
+
+The Android app opens on Roll call. Teachers can create assigned sections, add a student with a parent mobile number, and mark the student Present. Section and student creation require a network connection; roll call uses the cached roster and queues attendance and parent SMS locally. NFC attendance remains available in its own tab.
+
+Student creation requires the teacher to confirm the parent number was checked and consent was recorded. The app sends through Android SmsManager using the selected active SIM and the carrier's prepaid SMS balance or plan. It does not purchase load or check the remaining balance. Grant SMS and phone permissions in Settings and select the SIM before roll call. SMS status distinguishes queued, sent, delivered and failed; sent does not mean delivered.
+
+For a live school, follow [Firebase setup](docs/FIREBASE_SETUP.md), add the school's Android google-services.json, deploy functions and rules, provision an active academic year and grade, then approve the teacher's device. Teachers can create their first section after device approval. A build without Firebase configuration shows a connection-required screen.
+
+The source is organized into UI screens and forms, the Capacitor native bridge, Room attendance and SMS queues, and Firebase teacher callables. The native layer performs attendance and SIM operations; the browser fallback never sends SMS.
+
+Run pnpm test:integration for Firestore-backed teacher workflow tests, pnpm test:rules for rules, and Android testDebugUnitTest for local native policy tests. Native instrumented tests also need the Firebase Auth emulator on port 9099 and an Android emulator. The Android 13 suite covers Room migration, JSON bridge serialization, and concurrent Present taps. Real SIM delivery requires a physical Android phone. Use one attendance device per section when offline: separate offline phones can each send an SMS before cloud reconciliation.

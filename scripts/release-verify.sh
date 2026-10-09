@@ -38,13 +38,14 @@ run_check install "Frozen dependency installation" yes pnpm install --frozen-loc
 run_check format "Formatting" yes pnpm format:check
 run_check lint "Lint" yes pnpm lint
 run_check typecheck "TypeScript type check" yes pnpm typecheck
-run_check unit "Unit and integration tests" yes pnpm test
+run_check unit "Unit tests" yes pnpm test
 run_check build "Production web/functions build" yes pnpm build
 run_check security "Static security gate" yes pnpm security:check
 run_check git-diff "Git whitespace and conflict-marker check" yes bash -lc 'git diff --check && ! git grep -nE "^(<<<<<<<|=======|>>>>>>>)" -- . ":(exclude)reports"'
 run_check audit "Production dependency vulnerability audit" yes pnpm audit --prod --audit-level high
 
 if command -v java >/dev/null 2>&1 && command -v pnpm >/dev/null 2>&1; then
+  run_check integration "Teacher workflow integration tests" yes pnpm test:integration
   run_check rules "Firestore and Storage emulator rules tests" yes pnpm test:rules
 else
   skip_check rules "Firestore and Storage emulator rules tests" yes "Java or pnpm is unavailable in this environment. CI is configured to run this mandatory gate."
@@ -52,7 +53,7 @@ fi
 
 ANDROID_DIR="$ROOT/apps/teacher-mobile/android"
 if [[ -x "$ANDROID_DIR/gradlew" ]] && [[ -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ]]; then
-  run_check android "Android unit tests and debug APK" yes bash -lc 'cd apps/teacher-mobile && pnpm build && pnpm exec cap sync android && cd android && ./gradlew --no-daemon testDebugUnitTest assembleDebug'
+  run_check android "Android unit tests and debug APK" yes bash -c 'cd apps/teacher-mobile && pnpm build && pnpm exec cap sync android && cd android && ./gradlew --no-daemon testDebugUnitTest assembleDebug'
 else
   skip_check android "Android unit tests and debug APK" conditional "Android SDK or Gradle wrapper is unavailable locally. The GitHub Android CI job is mandatory before release."
 fi

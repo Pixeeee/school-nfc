@@ -1,8 +1,9 @@
-
 const PH_MOBILE = /^\+639\d{9}$/;
 
 export class PhoneValidationError extends Error {
-  constructor(message = "Enter a valid Philippine mobile number, such as 09171234567.") {
+  constructor(
+    message = "Enter a valid Philippine mobile number, such as 09171234567.",
+  ) {
     super(message);
     this.name = "PhoneValidationError";
   }

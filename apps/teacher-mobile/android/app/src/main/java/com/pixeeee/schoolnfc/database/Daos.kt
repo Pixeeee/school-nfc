@@ -8,7 +8,15 @@ import androidx.room.Query
 import androidx.room.Update
 
 @Dao
+interface SectionDao {
+    @Query("SELECT * FROM sections ORDER BY name") suspend fun all(): List<SectionEntity>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(items: List<SectionEntity>)
+    @Query("DELETE FROM sections") suspend fun clear()
+}
+
+@Dao
 interface StudentDao {
+    @Query("SELECT * FROM students WHERE sectionId = :sectionId AND status = 'ACTIVE' ORDER BY displayName") suspend fun inSection(sectionId: String): List<StudentEntity>
     @Query("SELECT * FROM students WHERE id = :id LIMIT 1") suspend fun byId(id: String): StudentEntity?
     @Query("SELECT * FROM students WHERE status = 'ACTIVE' AND (displayName LIKE '%' || :query || '%' OR studentNumber LIKE '%' || :query || '%') ORDER BY displayName LIMIT :limit")
     suspend fun search(query: String, limit: Int): List<StudentEntity>
@@ -58,6 +66,7 @@ interface AttendanceDao {
 
 @Dao
 interface SmsOutboxDao {
+    @Query("SELECT status FROM sms_outbox WHERE attendanceEventUuid = :eventUuid") suspend fun statusesForEvent(eventUuid: String): List<String>
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(entity: SmsOutboxEntity): Long
     @Query("SELECT * FROM sms_outbox WHERE status IN ('PENDING','READY','FAILED_RETRYABLE') AND nextAttemptAtEpochMs <= :now ORDER BY createdAtEpochMs LIMIT 1") suspend fun nextReady(now: Long): SmsOutboxEntity?
     @Query("UPDATE sms_outbox SET status = 'SENDING', attemptCount = attemptCount + 1, partCount = :partCount, sentPartCount = 0, deliveredPartCount = 0, subscriptionId = :subscriptionId, updatedAtEpochMs = :now WHERE messageId = :messageId AND status IN ('PENDING','READY','FAILED_RETRYABLE')")
@@ -69,7 +78,7 @@ interface SmsOutboxDao {
     suspend fun markPartDelivered(messageId: String, atIso: String, now: Long)
     @Query("UPDATE sms_outbox SET status = :status, lastErrorCode = :code, lastErrorMessage = :message, nextAttemptAtEpochMs = :nextAttempt, cloudDirty = 1, updatedAtEpochMs = :now WHERE messageId = :messageId")
     suspend fun markFailure(messageId: String, status: String, code: String, message: String, nextAttempt: Long, now: Long)
-    @Query("SELECT * FROM sms_outbox WHERE cloudDirty = 1 ORDER BY updatedAtEpochMs LIMIT :limit") suspend fun dirty(limit: Int): List<SmsOutboxEntity>
+    @Query("SELECT * FROM sms_outbox WHERE cloudDirty = 1 AND guardianId != 'TEST' ORDER BY updatedAtEpochMs LIMIT :limit") suspend fun dirty(limit: Int): List<SmsOutboxEntity>
     @Query("UPDATE sms_outbox SET cloudDirty = 0 WHERE messageId IN (:messageIds)") suspend fun markClean(messageIds: List<String>)
     @Query("UPDATE sms_outbox SET status = 'READY', nextAttemptAtEpochMs = 0, updatedAtEpochMs = :now WHERE status = 'FAILED_RETRYABLE'") suspend fun retryAll(now: Long): Int
     @Query("SELECT COUNT(*) FROM sms_outbox WHERE status IN ('PENDING','READY','SENDING')") suspend fun pendingCount(): Int

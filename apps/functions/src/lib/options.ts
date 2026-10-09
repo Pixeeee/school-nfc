@@ -1,4 +1,3 @@
-
 export const callableOptions = {
   region: "asia-southeast1" as const,
   enforceAppCheck: true,

@@ -26,7 +26,8 @@
     "bootstrap:platform-admin": "node scripts/set-platform-admin.mjs",
     "bootstrap:school": "node scripts/bootstrap-school.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\""
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,yml,yaml}\"",
+    "test:integration": "firebase emulators:exec --project demo-school-nfc --only firestore \"pnpm --filter @school-nfc/functions test\""
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
@@ -35,5 +36,10 @@
     "typescript": "^5.9.2",
     "firebase-admin": "^13.4.0",
     "prettier": "^3.6.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "@grpc/grpc-js": "^1.13.6"
+    }
   }
 }

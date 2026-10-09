@@ -1,2 +1,16 @@
-
-import { describe,expect,it } from "vitest";import { SchoolNfcWeb } from "./web";describe("web fallback",()=>{it("rejects weak sign-in",async()=>{const p=new SchoolNfcWeb();await expect(p.signIn({email:"a@b.com",password:"short"})).rejects.toThrow()});it("does not pretend browser NFC is production scanner",async()=>{const p=new SchoolNfcWeb();await expect(p.startScannerSession({schoolId:"school",mode:"ARRIVAL"})).rejects.toThrow(/Android/)});});
+import { describe, expect, it } from "vitest";
+import { SchoolNfcWeb } from "./web";
+describe("web fallback", () => {
+  it("rejects weak sign-in", async () => {
+    const p = new SchoolNfcWeb();
+    await expect(
+      p.signIn({ email: "a@b.com", password: "short" }),
+    ).rejects.toThrow();
+  });
+  it("does not pretend browser NFC is production scanner", async () => {
+    const p = new SchoolNfcWeb();
+    await expect(
+      p.startScannerSession({ schoolId: "school", mode: "ARRIVAL" }),
+    ).rejects.toThrow(/Android/);
+  });
+});

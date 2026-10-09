@@ -18,8 +18,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         if (cloud.currentUser() == null || !preferences.leaseValid()) return Result.failure()
         return try {
             uploadAttendance()
-            uploadSms()
             SnapshotSynchronizer(database, cloud, preferences, CryptoManager()).refreshAll()
+            uploadSms()
             Result.success()
         } catch (error: Exception) {
             Result.retry()
@@ -37,16 +37,20 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             val uuid = result["localEventUuid"]?.toString() ?: continue
             val state = result["result"]?.toString() ?: "CONFLICT"
             val localStatus = when (state) { "ACCEPTED", "ALREADY_EXISTS" -> "SYNCED"; else -> "CONFLICT" }
-            database.attendance().updateSync(uuid, localStatus, result["serverEventId"]?.toString(), result["conflictReason"]?.toString())
+            database.attendance().updateSync(uuid, localStatus, result["eventId"]?.toString(), result["errorMessage"]?.toString())
         }
-        val completed = results.filter { it["result"] == "ACCEPTED" || it["result"] == "ALREADY_EXISTS" }.mapNotNull { it["localEventUuid"]?.toString() }
+        val completed = results.filter { it["result"] in listOf("ACCEPTED", "ALREADY_EXISTS", "REJECTED") }.mapNotNull { it["localEventUuid"]?.toString() }
         if (completed.isNotEmpty()) database.syncOutbox().markDone("ATTENDANCE_EVENT", completed, now)
     }
 
+    @Suppress("UNCHECKED_CAST")
     private suspend fun uploadSms() {
         val dirty = database.smsOutbox().dirty(100)
         if (dirty.isEmpty()) return
-        cloud.ingestSmsResults(dirty)
-        database.smsOutbox().markClean(dirty.map { it.messageId })
+        val response = cloud.ingestSmsResults(dirty)
+        val results = response["results"] as? List<Map<String, Any?>> ?: error("SMS sync response is invalid.")
+        val accepted = results.filter { it["result"] == "ACCEPTED" }.mapNotNull { it["messageId"]?.toString() }
+        database.smsOutbox().markClean(accepted)
+        if (accepted.size != dirty.size) error("Some SMS results were rejected; retained for review and retry.")
     }
 }

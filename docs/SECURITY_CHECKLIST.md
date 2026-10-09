@@ -1,4 +1,3 @@
-
 # Security Release Checklist
 
 - [ ] `pnpm verify` passes from a clean checkout.

@@ -6,18 +6,21 @@ plugins {
 }
 android {
     namespace 'com.pixeeee.schoolnfc'
-    compileSdk 35
-    defaultConfig { applicationId 'com.pixeeee.schoolnfc'; minSdk 26; targetSdk 35; versionCode 1; versionName '1.0.0'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
+    compileSdk 36
+    defaultConfig { applicationId 'com.pixeeee.schoolnfc'; minSdk 26; targetSdk 36; versionCode 1; versionName '1.0.0'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
     buildFeatures { buildConfig true }
-    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
-    kotlinOptions { jvmTarget = '17' }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }
+    kotlinOptions { jvmTarget = '21' }
 }
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test:runner:1.7.0'
     implementation platform('com.google.firebase:firebase-bom:34.3.0')
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-functions'
     implementation 'com.google.firebase:firebase-appcheck-playintegrity'
-    debugImplementation 'com.google.firebase:firebase-appcheck-debug'
+    implementation 'com.google.firebase:firebase-appcheck-debug'
     implementation 'androidx.room:room-runtime:2.7.2'
     implementation 'androidx.room:room-ktx:2.7.2'
     ksp 'androidx.room:room-compiler:2.7.2'
@@ -26,5 +29,28 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2'
     implementation 'com.google.code.gson:gson:2.13.1'
 
+    implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation project(':capacitor-android')
+}
+
+if (file("google-services.json").exists()) { apply plugin: "com.google.gms.google-services" }
+
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+
+android { sourceSets { androidTest.assets.srcDirs += files("$projectDir/schemas") } }
+
+// CI provides signing material outside the source checkout.
+def releaseKeystore = System.getenv('SCHOOL_NFC_KEYSTORE_PATH')
+if (releaseKeystore) {
+    android {
+        signingConfigs {
+            release {
+                storeFile file(releaseKeystore)
+                storePassword System.getenv('SCHOOL_NFC_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('SCHOOL_NFC_KEY_ALIAS')
+                keyPassword System.getenv('SCHOOL_NFC_KEY_PASSWORD')
+            }
+        }
+        buildTypes { release { signingConfig signingConfigs.release } }
+    }
 }

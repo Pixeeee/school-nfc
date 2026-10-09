@@ -1,0 +1,881 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "1e376397bc39ff890ca2185150e9a7a1",
+    "entities": [
+      {
+        "tableName": "sections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "students",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `studentNumber` TEXT NOT NULL, `displayName` TEXT NOT NULL, `sectionId` TEXT NOT NULL, `status` TEXT NOT NULL, `photoPath` TEXT, `activeCardId` TEXT, `updatedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "studentNumber",
+            "columnName": "studentNumber",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sectionId",
+            "columnName": "sectionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "photoPath",
+            "columnName": "photoPath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "activeCardId",
+            "columnName": "activeCardId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updatedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_students_studentNumber",
+            "unique": false,
+            "columnNames": [
+              "studentNumber"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_students_studentNumber` ON `${TABLE_NAME}` (`studentNumber`)"
+          },
+          {
+            "name": "index_students_sectionId",
+            "unique": false,
+            "columnNames": [
+              "sectionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_students_sectionId` ON `${TABLE_NAME}` (`sectionId`)"
+          },
+          {
+            "name": "index_students_displayName",
+            "unique": false,
+            "columnNames": [
+              "displayName"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_students_displayName` ON `${TABLE_NAME}` (`displayName`)"
+          }
+        ]
+      },
+      {
+        "tableName": "cards",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `studentId` TEXT NOT NULL, `tokenHash` TEXT NOT NULL, `tagUidHash` TEXT, `payloadVersion` TEXT NOT NULL, `status` TEXT NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "studentId",
+            "columnName": "studentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tokenHash",
+            "columnName": "tokenHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tagUidHash",
+            "columnName": "tagUidHash",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "payloadVersion",
+            "columnName": "payloadVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updatedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cards_tokenHash",
+            "unique": true,
+            "columnNames": [
+              "tokenHash"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_cards_tokenHash` ON `${TABLE_NAME}` (`tokenHash`)"
+          },
+          {
+            "name": "index_cards_studentId",
+            "unique": false,
+            "columnNames": [
+              "studentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cards_studentId` ON `${TABLE_NAME}` (`studentId`)"
+          },
+          {
+            "name": "index_cards_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cards_status` ON `${TABLE_NAME}` (`status`)"
+          }
+        ]
+      },
+      {
+        "tableName": "guardian_routes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `studentId` TEXT NOT NULL, `guardianId` TEXT NOT NULL, `encryptedPhone` TEXT NOT NULL, `phoneStatus` TEXT NOT NULL, `consentStatus` TEXT NOT NULL, `guardianStatus` TEXT NOT NULL, `receiveArrivalSms` INTEGER NOT NULL, `receiveDismissalSms` INTEGER NOT NULL, `receiveLateSms` INTEGER NOT NULL, `receiveCustomSms` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "studentId",
+            "columnName": "studentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guardianId",
+            "columnName": "guardianId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPhone",
+            "columnName": "encryptedPhone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phoneStatus",
+            "columnName": "phoneStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "consentStatus",
+            "columnName": "consentStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guardianStatus",
+            "columnName": "guardianStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receiveArrivalSms",
+            "columnName": "receiveArrivalSms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receiveDismissalSms",
+            "columnName": "receiveDismissalSms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receiveLateSms",
+            "columnName": "receiveLateSms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receiveCustomSms",
+            "columnName": "receiveCustomSms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updatedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_guardian_routes_studentId",
+            "unique": false,
+            "columnNames": [
+              "studentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_guardian_routes_studentId` ON `${TABLE_NAME}` (`studentId`)"
+          },
+          {
+            "name": "index_guardian_routes_guardianId",
+            "unique": false,
+            "columnNames": [
+              "guardianId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_guardian_routes_guardianId` ON `${TABLE_NAME}` (`guardianId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sms_templates",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `eventType` TEXT NOT NULL, `name` TEXT NOT NULL, `body` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "body",
+            "columnName": "body",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updatedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sms_templates_eventType",
+            "unique": true,
+            "columnNames": [
+              "eventType"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sms_templates_eventType` ON `${TABLE_NAME}` (`eventType`)"
+          }
+        ]
+      },
+      {
+        "tableName": "scanner_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `schoolId` TEXT NOT NULL, `mode` TEXT NOT NULL, `sectionId` TEXT, `customLabel` TEXT, `teacherId` TEXT NOT NULL, `startedAtEpochMs` INTEGER NOT NULL, `stoppedAtEpochMs` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "schoolId",
+            "columnName": "schoolId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mode",
+            "columnName": "mode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sectionId",
+            "columnName": "sectionId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "customLabel",
+            "columnName": "customLabel",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "teacherId",
+            "columnName": "teacherId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAtEpochMs",
+            "columnName": "startedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stoppedAtEpochMs",
+            "columnName": "stoppedAtEpochMs",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "attendance_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`localId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `eventUuid` TEXT NOT NULL, `idempotencyKey` TEXT NOT NULL, `schoolId` TEXT NOT NULL, `studentId` TEXT NOT NULL, `cardId` TEXT NOT NULL, `source` TEXT NOT NULL DEFAULT 'NFC', `eventType` TEXT NOT NULL, `status` TEXT NOT NULL, `localSchoolDate` TEXT NOT NULL, `localTimestamp` TEXT NOT NULL, `elapsedRealtimeMs` INTEGER NOT NULL, `timezone` TEXT NOT NULL, `clockTrust` TEXT NOT NULL, `deviceId` TEXT NOT NULL, `teacherId` TEXT NOT NULL, `scannerSessionId` TEXT NOT NULL, `smsExpectedCount` INTEGER NOT NULL, `syncStatus` TEXT NOT NULL, `serverEventId` TEXT, `conflictReason` TEXT, `createdAtEpochMs` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "localId",
+            "columnName": "localId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventUuid",
+            "columnName": "eventUuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "idempotencyKey",
+            "columnName": "idempotencyKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "schoolId",
+            "columnName": "schoolId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "studentId",
+            "columnName": "studentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cardId",
+            "columnName": "cardId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'NFC'"
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localSchoolDate",
+            "columnName": "localSchoolDate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localTimestamp",
+            "columnName": "localTimestamp",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elapsedRealtimeMs",
+            "columnName": "elapsedRealtimeMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timezone",
+            "columnName": "timezone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clockTrust",
+            "columnName": "clockTrust",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "deviceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teacherId",
+            "columnName": "teacherId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scannerSessionId",
+            "columnName": "scannerSessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "smsExpectedCount",
+            "columnName": "smsExpectedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncStatus",
+            "columnName": "syncStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverEventId",
+            "columnName": "serverEventId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "conflictReason",
+            "columnName": "conflictReason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "createdAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "localId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_attendance_events_eventUuid",
+            "unique": true,
+            "columnNames": [
+              "eventUuid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_attendance_events_eventUuid` ON `${TABLE_NAME}` (`eventUuid`)"
+          },
+          {
+            "name": "index_attendance_events_idempotencyKey",
+            "unique": true,
+            "columnNames": [
+              "idempotencyKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_attendance_events_idempotencyKey` ON `${TABLE_NAME}` (`idempotencyKey`)"
+          },
+          {
+            "name": "index_attendance_events_syncStatus",
+            "unique": false,
+            "columnNames": [
+              "syncStatus"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_attendance_events_syncStatus` ON `${TABLE_NAME}` (`syncStatus`)"
+          },
+          {
+            "name": "index_attendance_events_studentId",
+            "unique": false,
+            "columnNames": [
+              "studentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_attendance_events_studentId` ON `${TABLE_NAME}` (`studentId`)"
+          },
+          {
+            "name": "index_attendance_events_localSchoolDate",
+            "unique": false,
+            "columnNames": [
+              "localSchoolDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_attendance_events_localSchoolDate` ON `${TABLE_NAME}` (`localSchoolDate`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sms_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`localId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `messageId` TEXT NOT NULL, `idempotencyKey` TEXT NOT NULL, `attendanceEventUuid` TEXT NOT NULL, `guardianId` TEXT NOT NULL, `encryptedPhone` TEXT NOT NULL, `renderedMessage` TEXT NOT NULL, `subscriptionId` INTEGER, `status` TEXT NOT NULL, `attemptCount` INTEGER NOT NULL, `nextAttemptAtEpochMs` INTEGER NOT NULL, `partCount` INTEGER NOT NULL, `sentPartCount` INTEGER NOT NULL, `deliveredPartCount` INTEGER NOT NULL, `sentAtIso` TEXT, `deliveredAtIso` TEXT, `lastErrorCode` TEXT, `lastErrorMessage` TEXT, `cloudDirty` INTEGER NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "localId",
+            "columnName": "localId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageId",
+            "columnName": "messageId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "idempotencyKey",
+            "columnName": "idempotencyKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attendanceEventUuid",
+            "columnName": "attendanceEventUuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guardianId",
+            "columnName": "guardianId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptedPhone",
+            "columnName": "encryptedPhone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "renderedMessage",
+            "columnName": "renderedMessage",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attemptCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextAttemptAtEpochMs",
+            "columnName": "nextAttemptAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "partCount",
+            "columnName": "partCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sentPartCount",
+            "columnName": "sentPartCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deliveredPartCount",
+            "columnName": "deliveredPartCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sentAtIso",
+            "columnName": "sentAtIso",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deliveredAtIso",
+            "columnName": "deliveredAtIso",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "lastErrorCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorMessage",
+            "columnName": "lastErrorMessage",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cloudDirty",
+            "columnName": "cloudDirty",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "createdAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updatedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "localId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sms_outbox_messageId",
+            "unique": true,
+            "columnNames": [
+              "messageId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sms_outbox_messageId` ON `${TABLE_NAME}` (`messageId`)"
+          },
+          {
+            "name": "index_sms_outbox_idempotencyKey",
+            "unique": true,
+            "columnNames": [
+              "idempotencyKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sms_outbox_idempotencyKey` ON `${TABLE_NAME}` (`idempotencyKey`)"
+          },
+          {
+            "name": "index_sms_outbox_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sms_outbox_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_sms_outbox_attendanceEventUuid",
+            "unique": false,
+            "columnNames": [
+              "attendanceEventUuid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sms_outbox_attendanceEventUuid` ON `${TABLE_NAME}` (`attendanceEventUuid`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sync_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `aggregateType` TEXT NOT NULL, `aggregateId` TEXT NOT NULL, `status` TEXT NOT NULL, `attemptCount` INTEGER NOT NULL, `nextAttemptAtEpochMs` INTEGER NOT NULL, `lastError` TEXT, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateType",
+            "columnName": "aggregateType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggregateId",
+            "columnName": "aggregateId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attemptCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextAttemptAtEpochMs",
+            "columnName": "nextAttemptAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "createdAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updatedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_outbox_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_sync_outbox_aggregateType",
+            "unique": false,
+            "columnNames": [
+              "aggregateType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_aggregateType` ON `${TABLE_NAME}` (`aggregateType`)"
+          },
+          {
+            "name": "index_sync_outbox_createdAtEpochMs",
+            "unique": false,
+            "columnNames": [
+              "createdAtEpochMs"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_createdAtEpochMs` ON `${TABLE_NAME}` (`createdAtEpochMs`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1e376397bc39ff890ca2185150e9a7a1')"
+    ]
+  }
+}

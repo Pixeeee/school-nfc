@@ -1,1 +1,4 @@
-export { ingestAttendanceBatch, correctAttendance } from "./secure-ingestion.js";
+export {
+  ingestAttendanceBatch,
+  correctAttendance,
+} from "./secure-ingestion.js";

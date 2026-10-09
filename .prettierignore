@@ -7,3 +7,4 @@ coverage
 apps/teacher-mobile/android
 reports
 pnpm-lock.yaml
+apps/functions/lib

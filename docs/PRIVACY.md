@@ -1,4 +1,3 @@
-
 # Privacy Deployment Requirements
 
 Before production, the school must approve:

@@ -1,4 +1,3 @@
-
 # Operations Runbook
 
 ## Issue a card

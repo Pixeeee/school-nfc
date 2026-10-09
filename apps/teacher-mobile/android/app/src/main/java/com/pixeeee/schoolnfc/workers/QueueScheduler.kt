@@ -15,7 +15,7 @@ object QueueScheduler {
         val request = OneTimeWorkRequestBuilder<com.pixeeee.schoolnfc.sms.SmsQueueWorker>()
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, Duration.ofSeconds(15))
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork("school-nfc-sms", ExistingWorkPolicy.KEEP, request)
+        WorkManager.getInstance(context).enqueueUniqueWork("school-nfc-sms", ExistingWorkPolicy.APPEND_OR_REPLACE, request)
     }
 
     fun scheduleSync(context: Context) {

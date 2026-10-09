@@ -1,6 +1,9 @@
-
 import { describe, expect, it } from "vitest";
-import { deterministicDocumentId, randomToken, sha256 } from "../src/lib/crypto.js";
+import {
+  deterministicDocumentId,
+  randomToken,
+  sha256,
+} from "../src/lib/crypto.js";
 
 describe("server crypto helpers", () => {
   it("creates URL-safe high-entropy tokens", () => {
@@ -10,6 +13,8 @@ describe("server crypto helpers", () => {
   });
   it("hashes deterministically", () => {
     expect(sha256("secret")).toHaveLength(64);
-    expect(deterministicDocumentId("event-key")).toBe(deterministicDocumentId("event-key"));
+    expect(deterministicDocumentId("event-key")).toBe(
+      deterministicDocumentId("event-key"),
+    );
   });
 });

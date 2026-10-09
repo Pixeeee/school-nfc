@@ -11,7 +11,7 @@ import androidx.work.Configuration
 class SchoolNfcApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
-        FirebaseApp.initializeApp(this)
+        if (FirebaseApp.initializeApp(this) == null) return
         val appCheck = FirebaseAppCheck.getInstance()
         if (BuildConfig.DEBUG) appCheck.installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
         else appCheck.installAppCheckProviderFactory(PlayIntegrityAppCheckProviderFactory.getInstance())

@@ -12,7 +12,9 @@ const schema = z
     guardianId: z.string().min(6).max(128),
     displayName: z.string().trim().min(2).max(160).optional(),
     phone: z.string().trim().min(10).max(32).optional(),
-    phoneStatus: z.enum(["UNVERIFIED", "VERIFIED", "INVALID", "DISABLED"]).optional(),
+    phoneStatus: z
+      .enum(["UNVERIFIED", "VERIFIED", "INVALID", "DISABLED"])
+      .optional(),
     consentStatus: z.enum(["NOT_RECORDED", "RECORDED", "WITHDRAWN"]).optional(),
     verificationConfirmed: z.boolean().default(false),
     consentConfirmed: z.boolean().default(false),
@@ -33,7 +35,10 @@ function normalizePhilippineMobile(value: string): string {
           : compact;
 
   if (!/^\+639\d{9}$/.test(normalized)) {
-    throw new HttpsError("invalid-argument", "Enter a valid Philippine mobile number.");
+    throw new HttpsError(
+      "invalid-argument",
+      "Enter a valid Philippine mobile number.",
+    );
   }
   return normalized;
 }
@@ -60,10 +65,13 @@ export const updateGuardian = onCall(
         issues: parsed.error.flatten(),
       });
     }
+    const actorUid = request.auth.uid;
     const input = parsed.data;
 
-    const memberRef = db.doc(`schools/${input.schoolId}/members/${request.auth.uid}`);
-    const guardianRef = db.doc(`schools/${input.schoolId}/guardians/${input.guardianId}`);
+    const memberRef = db.doc(`schools/${input.schoolId}/members/${actorUid}`);
+    const guardianRef = db.doc(
+      `schools/${input.schoolId}/guardians/${input.guardianId}`,
+    );
     const auditRef = db.collection(`schools/${input.schoolId}/auditLogs`).doc();
 
     await db.runTransaction(async (transaction) => {
@@ -71,16 +79,23 @@ export const updateGuardian = onCall(
         memberRef,
         guardianRef,
       );
+      if (!memberSnapshot || !guardianSnapshot)
+        throw new HttpsError("internal", "Transaction documents are missing.");
 
-      const permissions = memberSnapshot.exists && Array.isArray(memberSnapshot.get("permissions"))
-        ? (memberSnapshot.get("permissions") as unknown[])
-        : [];
+      const permissions =
+        memberSnapshot.exists &&
+        Array.isArray(memberSnapshot.get("permissions"))
+          ? (memberSnapshot.get("permissions") as unknown[])
+          : [];
       if (
-        !memberSnapshot.exists
-        || memberSnapshot.get("status") !== "ACTIVE"
-        || !permissions.includes("guardian.update")
+        !memberSnapshot.exists ||
+        memberSnapshot.get("status") !== "ACTIVE" ||
+        !permissions.includes("guardian.update")
       ) {
-        throw new HttpsError("permission-denied", "guardian.update permission is required.");
+        throw new HttpsError(
+          "permission-denied",
+          "guardian.update permission is required.",
+        );
       }
       if (!guardianSnapshot.exists) {
         throw new HttpsError("not-found", "Guardian was not found.");
@@ -101,9 +116,10 @@ export const updateGuardian = onCall(
       const before = guardianSnapshot.data() ?? {};
       const update: Record<string, unknown> = {
         updatedAt: FieldValue.serverTimestamp(),
-        updatedBy: request.auth.uid,
+        updatedBy: actorUid,
       };
-      if (input.displayName !== undefined) update.displayName = input.displayName;
+      if (input.displayName !== undefined)
+        update.displayName = input.displayName;
       if (input.phone !== undefined) {
         const phoneE164 = normalizePhilippineMobile(input.phone);
         update.phoneE164 = phoneE164;
@@ -117,23 +133,23 @@ export const updateGuardian = onCall(
         update.phoneStatus = input.phoneStatus;
         if (input.phoneStatus === "VERIFIED") {
           update.phoneVerifiedAt = FieldValue.serverTimestamp();
-          update.phoneVerifiedBy = request.auth.uid;
+          update.phoneVerifiedBy = actorUid;
         }
       }
       if (input.consentStatus !== undefined) {
         update.consentStatus = input.consentStatus;
-        update.consentRecordedAt = input.consentStatus === "RECORDED"
-          ? FieldValue.serverTimestamp()
-          : FieldValue.delete();
-        update.consentRecordedBy = input.consentStatus === "RECORDED"
-          ? request.auth.uid
-          : FieldValue.delete();
+        update.consentRecordedAt =
+          input.consentStatus === "RECORDED"
+            ? FieldValue.serverTimestamp()
+            : FieldValue.delete();
+        update.consentRecordedBy =
+          input.consentStatus === "RECORDED" ? actorUid : FieldValue.delete();
       }
 
       transaction.update(guardianRef, update);
       transaction.create(auditRef, {
         type: "GUARDIAN_VERIFICATION_UPDATED",
-        actorUid: request.auth.uid,
+        actorUid: actorUid,
         schoolId: input.schoolId,
         targetType: "guardian",
         targetId: input.guardianId,

@@ -1,11 +1,12 @@
-
 {
   "name": "@school-nfc/functions",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
-  "engines": { "node": "22" },
+  "engines": {
+    "node": "22"
+  },
   "scripts": {
     "build": "tsup src/index.ts --format esm --platform node --target node22 --out-dir lib --clean --sourcemap --external firebase-admin --external firebase-functions",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -1,10 +1,12 @@
+import {
+  effectivePermissions,
+  ROLE_PERMISSIONS,
+  type Role,
+  type Permission,
+} from "@school-nfc/contracts";
 import { createHash } from "node:crypto";
 import { getApps, initializeApp } from "firebase-admin/app";
-import {
-  FieldValue,
-  Timestamp,
-  getFirestore,
-} from "firebase-admin/firestore";
+import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import type {
   DocumentData,
   DocumentReference,
@@ -29,17 +31,31 @@ const attendanceEventSchema = z
     eventUuid: z.string().uuid(),
     idempotencyKey: z.string().min(16).max(256),
     studentId: z.string().min(4).max(128),
-    cardId: z.string().min(4).max(128),
+    cardId: z.string().min(3).max(128).optional(),
     eventType: z.enum(["ARRIVAL", "DISMISSAL", "CUSTOM"]),
     localSchoolDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     localTimestamp: z.string().datetime({ offset: true }),
     timezone: z.string().min(1).max(64),
     clockTrust: z.string().min(1).max(32).default("UNKNOWN"),
     scannerSessionId: z.string().min(1).max(128).optional(),
-    source: z.string().min(1).max(32).default("NFC"),
+    source: z.enum(["NFC", "MANUAL"]).default("NFC"),
     status: z.string().min(1).max(32).optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((event, context) => {
+    if (event.source === "NFC" && !event.cardId)
+      context.addIssue({
+        code: "custom",
+        path: ["cardId"],
+        message: "NFC attendance requires a card.",
+      });
+    if (event.source === "MANUAL" && event.eventType !== "ARRIVAL")
+      context.addIssue({
+        code: "custom",
+        path: ["eventType"],
+        message: "Manual roll call records presence only.",
+      });
+  });
 
 const attendanceBatchSchema = z
   .object({
@@ -83,7 +99,7 @@ const smsBatchSchema = z
     deviceId: z.string().min(4).max(128),
     leaseId: z.string().min(4).max(128),
     batchId: z.string().min(4).max(128).optional(),
-    messages: z.array(smsResultSchema).min(1).max(100),
+    results: z.array(smsResultSchema).min(1).max(200),
   })
   .passthrough();
 
@@ -110,7 +126,7 @@ const EVENT_PERMISSION: Record<string, string> = {
 };
 
 const PRIVILEGED_ROLES = new Set([
-  "PLATFORM_SUPER_ADMIN",
+  "PLATFORM_ADMIN",
   "SCHOOL_ADMIN",
   "REGISTRAR",
   "ATTENDANCE_OFFICER",
@@ -196,7 +212,10 @@ function assertTimeWindow(
   }
   const now = Date.now();
   if (value > now + 15 * 60_000 || value < now - 45 * 24 * 60 * 60_000) {
-    throw new HttpsError("failed-precondition", "Attendance timestamp is outside the accepted window.");
+    throw new HttpsError(
+      "failed-precondition",
+      "Attendance timestamp is outside the accepted window.",
+    );
   }
 
   try {
@@ -206,9 +225,11 @@ function assertTimeWindow(
       month: "2-digit",
       day: "2-digit",
     }).formatToParts(new Date(value));
-    const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const map = Object.fromEntries(
+      parts.map((part) => [part.type, part.value]),
+    );
     const derivedDate = `${map.year}-${map.month}-${map.day}`;
-    if (clockTrust === "TRUSTED" && derivedDate !== localSchoolDate) {
+    if (derivedDate !== localSchoolDate) {
       throw new HttpsError(
         "failed-precondition",
         "Local school date does not match the trusted timestamp and timezone.",
@@ -226,10 +247,25 @@ function isPrivileged(role: unknown): boolean {
 
 function assertPermission(member: DocumentSnapshot, permission: string): void {
   if (!member.exists || member.get("status") !== "ACTIVE") {
-    throw new HttpsError("permission-denied", "Active school membership is required.");
+    throw new HttpsError(
+      "permission-denied",
+      "Active school membership is required.",
+    );
   }
-  if (!strings(member.get("permissions")).includes(permission)) {
-    throw new HttpsError("permission-denied", `Missing permission: ${permission}`);
+  const role = member.get("role") as Role;
+  const permissions =
+    role in ROLE_PERMISSIONS
+      ? effectivePermissions(
+          role,
+          strings(member.get("permissionAdditions")) as Permission[],
+          strings(member.get("permissionRemovals")) as Permission[],
+        )
+      : [];
+  if (!permissions.includes(permission as Permission)) {
+    throw new HttpsError(
+      "permission-denied",
+      `Missing permission: ${permission}`,
+    );
   }
 }
 
@@ -239,10 +275,13 @@ function assertSectionScope(
   sectionId: string,
 ): void {
   if (isPrivileged(member.get("role"))) return;
-  const memberSections = new Set(strings(member.get("allowedSectionIds")));
+  const memberSections = new Set(strings(member.get("sectionIds")));
   const deviceSections = new Set(strings(device.get("allowedSectionIds")));
   if (!memberSections.has(sectionId) || !deviceSections.has(sectionId)) {
-    throw new HttpsError("permission-denied", "Student section is outside the authorized scope.");
+    throw new HttpsError(
+      "permission-denied",
+      "Student section is outside the authorized scope.",
+    );
   }
 }
 
@@ -255,19 +294,40 @@ function assertDeviceAndLease(
   if (!device.exists || device.get("status") !== "APPROVED") {
     throw new HttpsError("permission-denied", "Approved device is required.");
   }
-  const owner = device.get("ownerUid") ?? device.get("registeredByUid") ?? device.get("registeredBy") ?? device.get("userId");
+  const owner =
+    device.get("assignedUserId") ??
+    device.get("ownerUid") ??
+    device.get("registeredByUid") ??
+    device.get("registeredBy") ??
+    device.get("userId");
   if (owner !== uid) {
-    throw new HttpsError("permission-denied", "Device does not belong to the authenticated user.");
+    throw new HttpsError(
+      "permission-denied",
+      "Device does not belong to the authenticated user.",
+    );
   }
-  if (!lease.exists || !["ACTIVE", "APPROVED", "VALID"].includes(String(lease.get("status")))) {
-    throw new HttpsError("permission-denied", "An active device lease is required.");
+  if (
+    !lease.exists ||
+    !["ACTIVE", "APPROVED", "VALID"].includes(String(lease.get("status")))
+  ) {
+    throw new HttpsError(
+      "permission-denied",
+      "An active device lease is required.",
+    );
   }
   if (lease.get("deviceId") !== deviceId) {
-    throw new HttpsError("permission-denied", "Device lease does not match the device.");
+    throw new HttpsError(
+      "permission-denied",
+      "Device lease does not match the device.",
+    );
   }
-  const leaseUid = lease.get("uid") ?? lease.get("userId") ?? lease.get("ownerUid");
+  const leaseUid =
+    lease.get("uid") ?? lease.get("userId") ?? lease.get("ownerUid");
   if (leaseUid && leaseUid !== uid) {
-    throw new HttpsError("permission-denied", "Device lease does not belong to the authenticated user.");
+    throw new HttpsError(
+      "permission-denied",
+      "Device lease does not belong to the authenticated user.",
+    );
   }
   const expiresAt = dateFromUnknown(lease.get("expiresAt"));
   if (!expiresAt || expiresAt.getTime() <= Date.now()) {
@@ -275,212 +335,304 @@ function assertDeviceAndLease(
   }
 }
 
-function effectiveAttendanceStatus(eventType: string, supplied?: string): string {
-  if (supplied && ["PRESENT", "LATE", "DISMISSED"].includes(supplied)) return supplied;
+function effectiveAttendanceStatus(
+  eventType: string,
+  supplied?: string,
+): string {
+  if (supplied && ["PRESENT", "LATE", "DISMISSED"].includes(supplied))
+    return supplied;
   return eventType === "DISMISSAL" ? "DISMISSED" : "PRESENT";
 }
 
-function attendanceReferences(schoolId: string, input: {
-  deviceId: string;
-  leaseId: string;
-  studentId: string;
-  cardId: string;
-  eventId: string;
-  eventUuid: string;
-  dailyId: string;
-  uid: string;
-}) {
+function attendanceReferences(
+  schoolId: string,
+  input: {
+    deviceId: string;
+    leaseId: string;
+    studentId: string;
+    cardId?: string;
+    eventId: string;
+    eventUuid: string;
+    dailyId: string;
+    uid: string;
+  },
+) {
   return {
     member: db.doc(`schools/${schoolId}/members/${input.uid}`),
     device: db.doc(`schools/${schoolId}/devices/${input.deviceId}`),
     lease: db.doc(`schools/${schoolId}/deviceLeases/${input.leaseId}`),
     student: db.doc(`schools/${schoolId}/students/${input.studentId}`),
-    card: db.doc(`schools/${schoolId}/nfcCards/${input.cardId}`),
+    card: input.cardId
+      ? db.doc(`schools/${schoolId}/nfcCards/${input.cardId}`)
+      : null,
     event: db.doc(`schools/${schoolId}/attendanceEvents/${input.eventId}`),
-    eventUuid: db.doc(`schools/${schoolId}/attendanceEventUuids/${sha256(input.eventUuid)}`),
+    eventUuid: db.doc(
+      `schools/${schoolId}/attendanceEventUuids/${sha256(input.eventUuid)}`,
+    ),
     daily: db.doc(`schools/${schoolId}/attendanceDays/${input.dailyId}`),
     audit: db.collection(`schools/${schoolId}/auditLogs`).doc(),
   };
 }
 
-export const ingestAttendanceBatch = onCall(callableOptions, async (request) => {
-  const uid = requireAuth(request);
-  const input = parseOrThrow(attendanceBatchSchema, request.data);
-  const results: Array<Record<string, unknown>> = [];
+export const ingestAttendanceBatch = onCall(
+  callableOptions,
+  async (request) => {
+    const uid = requireAuth(request);
+    const input = parseOrThrow(attendanceBatchSchema, request.data);
+    const results: Array<Record<string, unknown>> = [];
 
-  for (const event of input.events) {
-    try {
-      const requiredPermission = EVENT_PERMISSION[event.eventType];
-      if (!requiredPermission) {
-        throw new HttpsError("invalid-argument", "Unsupported attendance event type.");
-      }
-      const canonicalKey = canonicalAttendanceKey(
-        input.schoolId,
-        event.studentId,
-        event.localSchoolDate,
-        event.eventType,
-      );
-      if (!keyMatches(event.idempotencyKey, canonicalKey)) {
-        throw new HttpsError("invalid-argument", "Attendance idempotency key does not match server data.");
-      }
-      assertTimeWindow(
-        event.localTimestamp,
-        event.localSchoolDate,
-        event.timezone,
-        event.clockTrust,
-      );
-
-      const eventId = sha256(canonicalKey);
-      const dailyId = sha256(`${input.schoolId}|${event.studentId}|${event.localSchoolDate}`);
-      const refs = attendanceReferences(input.schoolId, {
-        deviceId: input.deviceId,
-        leaseId: input.leaseId,
-        studentId: event.studentId,
-        cardId: event.cardId,
-        eventId,
-        eventUuid: event.eventUuid,
-        dailyId,
-        uid,
-      });
-
-      const transactionResult = await db.runTransaction(async (transaction) => {
-        const [member, device, lease, student, card, existingEvent, existingUuid, daily] = await transaction.getAll(
-          refs.member,
-          refs.device,
-          refs.lease,
-          refs.student,
-          refs.card,
-          refs.event,
-          refs.eventUuid,
-          refs.daily,
-        );
-
-        assertPermission(member, requiredPermission);
-        assertDeviceAndLease(uid, input.deviceId, device, lease);
-
-        if (!student.exists || student.get("status") !== "ACTIVE") {
-          throw new HttpsError("failed-precondition", "Student is not active.");
-        }
-        if (!card.exists || card.get("status") !== "ACTIVE") {
-          throw new HttpsError("failed-precondition", "NFC card is not active.");
-        }
-        if (card.get("studentId") !== event.studentId) {
-          throw new HttpsError("failed-precondition", "NFC card is not assigned to this student.");
-        }
-        const sectionId = student.get("sectionId");
-        if (typeof sectionId !== "string" || sectionId.length === 0) {
-          throw new HttpsError("failed-precondition", "Student has no active section.");
-        }
-        if (typeof card.get("sectionId") === "string" && card.get("sectionId") !== sectionId) {
-          throw new HttpsError("failed-precondition", "Card/student section mismatch.");
-        }
-        assertSectionScope(member, device, sectionId);
-
-        if (existingUuid.exists && existingUuid.get("eventId") !== eventId) {
+    for (const event of input.events) {
+      try {
+        const requiredPermission = EVENT_PERMISSION[event.eventType];
+        if (!requiredPermission) {
           throw new HttpsError(
-            "already-exists",
-            "The event UUID was already used for a different attendance event.",
+            "invalid-argument",
+            "Unsupported attendance event type.",
           );
         }
-        if (existingEvent.exists) {
-          return { result: "ALREADY_EXISTS", eventId, sectionId };
+        const canonicalKey = canonicalAttendanceKey(
+          input.schoolId,
+          event.studentId,
+          event.localSchoolDate,
+          event.eventType,
+        );
+        if (!keyMatches(event.idempotencyKey, canonicalKey)) {
+          throw new HttpsError(
+            "invalid-argument",
+            "Attendance idempotency key does not match server data.",
+          );
         }
+        assertTimeWindow(
+          event.localTimestamp,
+          event.localSchoolDate,
+          event.timezone,
+          event.clockTrust,
+        );
 
-        const status = effectiveAttendanceStatus(event.eventType, event.status);
-        const eventRecord = {
-          eventId,
-          eventUuid: event.eventUuid,
-          idempotencyKey: canonicalKey,
-          schoolId: input.schoolId,
+        const eventId = sha256(canonicalKey);
+        const dailyId = sha256(
+          `${input.schoolId}|${event.studentId}|${event.localSchoolDate}`,
+        );
+        const refs = attendanceReferences(input.schoolId, {
+          deviceId: input.deviceId,
+          leaseId: input.leaseId,
           studentId: event.studentId,
           cardId: event.cardId,
-          sectionId,
-          eventType: event.eventType,
-          localSchoolDate: event.localSchoolDate,
-          localTimestamp: event.localTimestamp,
-          timezone: event.timezone,
-          clockTrust: event.clockTrust,
-          deviceId: input.deviceId,
-          teacherId: uid,
-          scannerSessionId: event.scannerSessionId ?? null,
-          source: event.source,
-          status,
-          batchId: input.batchId,
-          cloudReceivedAt: FieldValue.serverTimestamp(),
-          createdAt: FieldValue.serverTimestamp(),
-        };
-        transaction.create(refs.event, eventRecord);
-        if (!existingUuid.exists) {
-          transaction.create(refs.eventUuid, {
-            eventUuid: event.eventUuid,
-            eventId,
-            studentId: event.studentId,
-            localSchoolDate: event.localSchoolDate,
-            eventType: event.eventType,
-            createdAt: FieldValue.serverTimestamp(),
+          eventId,
+          eventUuid: event.eventUuid,
+          dailyId,
+          uid,
+        });
+
+        const transactionResult = await db.runTransaction(
+          async (transaction) => {
+            const [
+              member,
+              device,
+              lease,
+              student,
+              existingEvent,
+              existingUuid,
+              daily,
+              card,
+            ] = await transaction.getAll(
+              refs.member,
+              refs.device,
+              refs.lease,
+              refs.student,
+              refs.event,
+              refs.eventUuid,
+              refs.daily,
+              ...(refs.card ? [refs.card] : []),
+            );
+            if (
+              !member ||
+              !device ||
+              !lease ||
+              !student ||
+              !existingEvent ||
+              !existingUuid ||
+              !daily
+            )
+              throw new HttpsError(
+                "internal",
+                "Transaction documents are missing.",
+              );
+
+            assertPermission(member, requiredPermission);
+            assertDeviceAndLease(uid, input.deviceId, device, lease);
+
+            if (!student.exists || student.get("status") !== "ACTIVE") {
+              throw new HttpsError(
+                "failed-precondition",
+                "Student is not active.",
+              );
+            }
+            if (
+              event.source === "NFC" &&
+              (!card?.exists || card.get("status") !== "ACTIVE")
+            ) {
+              throw new HttpsError(
+                "failed-precondition",
+                "NFC card is not active.",
+              );
+            }
+            if (
+              event.source === "NFC" &&
+              card?.get("studentId") !== event.studentId
+            ) {
+              throw new HttpsError(
+                "failed-precondition",
+                "NFC card is not assigned to this student.",
+              );
+            }
+            const sectionId = student.get("sectionId");
+            if (typeof sectionId !== "string" || sectionId.length === 0) {
+              throw new HttpsError(
+                "failed-precondition",
+                "Student has no active section.",
+              );
+            }
+            if (
+              event.source === "NFC" &&
+              typeof card?.get("sectionId") === "string" &&
+              card?.get("sectionId") !== sectionId
+            ) {
+              throw new HttpsError(
+                "failed-precondition",
+                "Card/student section mismatch.",
+              );
+            }
+            assertSectionScope(member, device, sectionId);
+            if (
+              !isPrivileged(member.get("role")) &&
+              !strings(lease.get("sectionIds")).includes(sectionId)
+            )
+              throw new HttpsError(
+                "permission-denied",
+                "Section is outside this device lease.",
+              );
+
+            if (
+              existingUuid.exists &&
+              existingUuid.get("eventId") !== eventId
+            ) {
+              throw new HttpsError(
+                "already-exists",
+                "The event UUID was already used for a different attendance event.",
+              );
+            }
+            if (existingEvent.exists) {
+              return { result: "ALREADY_EXISTS", eventId, sectionId };
+            }
+
+            const status = effectiveAttendanceStatus(
+              event.eventType,
+              event.status,
+            );
+            const eventRecord = {
+              eventId,
+              eventUuid: event.eventUuid,
+              idempotencyKey: canonicalKey,
+              schoolId: input.schoolId,
+              studentId: event.studentId,
+              cardId: event.source === "NFC" ? event.cardId : null,
+              sectionId,
+              eventType: event.eventType,
+              localSchoolDate: event.localSchoolDate,
+              localTimestamp: event.localTimestamp,
+              timezone: event.timezone,
+              clockTrust: event.clockTrust,
+              deviceId: input.deviceId,
+              teacherId: uid,
+              scannerSessionId: event.scannerSessionId ?? null,
+              source: event.source,
+              status,
+              batchId: input.batchId,
+              cloudReceivedAt: FieldValue.serverTimestamp(),
+              createdAt: FieldValue.serverTimestamp(),
+            };
+            transaction.create(refs.event, eventRecord);
+            if (!existingUuid.exists) {
+              transaction.create(refs.eventUuid, {
+                eventUuid: event.eventUuid,
+                eventId,
+                studentId: event.studentId,
+                localSchoolDate: event.localSchoolDate,
+                eventType: event.eventType,
+                createdAt: FieldValue.serverTimestamp(),
+              });
+            }
+
+            const dailyData: Record<string, unknown> = {
+              schoolId: input.schoolId,
+              studentId: event.studentId,
+              sectionId,
+              localSchoolDate: event.localSchoolDate,
+              updatedAt: FieldValue.serverTimestamp(),
+            };
+            if (event.eventType === "ARRIVAL") {
+              dailyData.arrivalEventId = eventId;
+              dailyData.arrivalTime = event.localTimestamp;
+              dailyData.status = status;
+            } else if (event.eventType === "DISMISSAL") {
+              dailyData.dismissalEventId = eventId;
+              dailyData.dismissalTime = event.localTimestamp;
+              dailyData.dismissalStatus = status;
+            } else {
+              dailyData.lastCustomEventId = eventId;
+              dailyData.lastCustomEventTime = event.localTimestamp;
+            }
+            if (daily.exists)
+              transaction.set(refs.daily, dailyData, { merge: true });
+            else
+              transaction.create(refs.daily, {
+                ...dailyData,
+                createdAt: FieldValue.serverTimestamp(),
+              });
+
+            if (event.source === "NFC" && refs.card)
+              transaction.update(refs.card, {
+                lastUsedAt: FieldValue.serverTimestamp(),
+                lastUsedDeviceId: input.deviceId,
+              });
+            transaction.update(refs.device, {
+              lastSeenAt: FieldValue.serverTimestamp(),
+            });
+            transaction.create(refs.audit, {
+              type: "ATTENDANCE_ACCEPTED",
+              actorUid: uid,
+              deviceId: input.deviceId,
+              targetType: "attendanceEvent",
+              targetId: eventId,
+              studentId: event.studentId,
+              sectionId,
+              eventType: event.eventType,
+              createdAt: FieldValue.serverTimestamp(),
+            });
+            return { result: "ACCEPTED", eventId, sectionId };
+          },
+        );
+
+        results.push({ localEventUuid: event.eventUuid, ...transactionResult });
+      } catch (error) {
+        if (error instanceof HttpsError) {
+          results.push({
+            localEventUuid: event.eventUuid,
+            result:
+              error.code === "already-exists" ? "ALREADY_EXISTS" : "REJECTED",
+            errorCode: error.code,
+            errorMessage: error.message,
           });
+          continue;
         }
-
-        const dailyData: Record<string, unknown> = {
-          schoolId: input.schoolId,
-          studentId: event.studentId,
-          sectionId,
-          localSchoolDate: event.localSchoolDate,
-          updatedAt: FieldValue.serverTimestamp(),
-        };
-        if (event.eventType === "ARRIVAL") {
-          dailyData.arrivalEventId = eventId;
-          dailyData.arrivalTime = event.localTimestamp;
-          dailyData.status = status;
-        } else if (event.eventType === "DISMISSAL") {
-          dailyData.dismissalEventId = eventId;
-          dailyData.dismissalTime = event.localTimestamp;
-          dailyData.dismissalStatus = status;
-        } else {
-          dailyData.lastCustomEventId = eventId;
-          dailyData.lastCustomEventTime = event.localTimestamp;
-        }
-        if (daily.exists) transaction.set(refs.daily, dailyData, { merge: true });
-        else transaction.create(refs.daily, { ...dailyData, createdAt: FieldValue.serverTimestamp() });
-
-        transaction.update(refs.card, {
-          lastUsedAt: FieldValue.serverTimestamp(),
-          lastUsedDeviceId: input.deviceId,
-        });
-        transaction.update(refs.device, {
-          lastSeenAt: FieldValue.serverTimestamp(),
-        });
-        transaction.create(refs.audit, {
-          type: "ATTENDANCE_ACCEPTED",
-          actorUid: uid,
-          deviceId: input.deviceId,
-          targetType: "attendanceEvent",
-          targetId: eventId,
-          studentId: event.studentId,
-          sectionId,
-          eventType: event.eventType,
-          createdAt: FieldValue.serverTimestamp(),
-        });
-        return { result: "ACCEPTED", eventId, sectionId };
-      });
-
-      results.push({ localEventUuid: event.eventUuid, ...transactionResult });
-    } catch (error) {
-      if (error instanceof HttpsError) {
-        results.push({
-          localEventUuid: event.eventUuid,
-          result: error.code === "already-exists" ? "ALREADY_EXISTS" : "REJECTED",
-          errorCode: error.code,
-          errorMessage: error.message,
-        });
-        continue;
+        throw error;
       }
-      throw error;
     }
-  }
 
-  return { batchId: input.batchId, results };
-});
+    return { batchId: input.batchId, results };
+  },
+);
 
 async function findAttendanceRef(
   schoolId: string,
@@ -489,9 +641,13 @@ async function findAttendanceRef(
   const collection = db.collection(`schools/${schoolId}/attendanceEvents`);
   const direct = await collection.doc(reference).get();
   if (direct.exists) return direct.ref;
-  const byUuid = await collection.where("eventUuid", "==", reference).limit(1).get();
+  const byUuid = await collection
+    .where("eventUuid", "==", reference)
+    .limit(1)
+    .get();
   const document = byUuid.docs.at(0);
-  if (!document) throw new HttpsError("not-found", "Attendance event was not found.");
+  if (!document)
+    throw new HttpsError("not-found", "Attendance event was not found.");
   return document.ref;
 }
 
@@ -502,13 +658,23 @@ function assertSmsTransition(previous: unknown, next: string): void {
   if (nextRank === undefined || previousRank === undefined) {
     throw new HttpsError("invalid-argument", "Unsupported SMS status.");
   }
-  const allowedRetry = previous === "FAILED_RETRYABLE"
-    && ["READY", "SENDING", "SENT", "DELIVERED", "FAILED_FINAL"].includes(next);
+  const allowedRetry =
+    previous === "FAILED_RETRYABLE" &&
+    ["READY", "SENDING", "SENT", "DELIVERED", "FAILED_FINAL"].includes(next);
   if (!allowedRetry && nextRank < previousRank) {
-    throw new HttpsError("failed-precondition", "SMS status cannot move backwards.");
+    throw new HttpsError(
+      "failed-precondition",
+      "SMS status cannot move backwards.",
+    );
   }
-  if (["DELIVERED", "FAILED_FINAL", "CANCELLED"].includes(previous) && next !== previous) {
-    throw new HttpsError("failed-precondition", "Final SMS status cannot be changed.");
+  if (
+    ["DELIVERED", "FAILED_FINAL", "CANCELLED"].includes(previous) &&
+    next !== previous
+  ) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Final SMS status cannot be changed.",
+    );
   }
 }
 
@@ -517,13 +683,22 @@ export const ingestSmsResults = onCall(callableOptions, async (request) => {
   const input = parseOrThrow(smsBatchSchema, request.data);
   const results: Array<Record<string, unknown>> = [];
 
-  for (const message of input.messages) {
+  for (const message of input.results) {
     try {
-      const attendanceRef = await findAttendanceRef(input.schoolId, message.attendanceEventId);
+      const attendanceRef = await findAttendanceRef(
+        input.schoolId,
+        message.attendanceEventId,
+      );
       const attendancePreview = await attendanceRef.get();
       const previewStudentId = attendancePreview.get("studentId");
-      if (typeof previewStudentId !== "string" || previewStudentId.length === 0) {
-        throw new HttpsError("failed-precondition", "Attendance event has no student reference.");
+      if (
+        typeof previewStudentId !== "string" ||
+        previewStudentId.length === 0
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Attendance event has no student reference.",
+        );
       }
       const linksQuery = await db
         .collection(`schools/${input.schoolId}/studentGuardianLinks`)
@@ -533,21 +708,38 @@ export const ingestSmsResults = onCall(callableOptions, async (request) => {
         .get();
       const candidateLinkRefs = linksQuery.docs.map((document) => document.ref);
       if (candidateLinkRefs.length === 0) {
-        throw new HttpsError("permission-denied", "Guardian is not linked to this student.");
+        throw new HttpsError(
+          "permission-denied",
+          "Guardian is not linked to this student.",
+        );
       }
 
       const messageDocId = sha256(`${attendanceRef.id}|${message.guardianId}`);
       const refs = {
         member: db.doc(`schools/${input.schoolId}/members/${uid}`),
         device: db.doc(`schools/${input.schoolId}/devices/${input.deviceId}`),
-        lease: db.doc(`schools/${input.schoolId}/deviceLeases/${input.leaseId}`),
-        guardian: db.doc(`schools/${input.schoolId}/guardians/${message.guardianId}`),
-        message: db.doc(`schools/${input.schoolId}/smsMessages/${messageDocId}`),
+        lease: db.doc(
+          `schools/${input.schoolId}/deviceLeases/${input.leaseId}`,
+        ),
+        guardian: db.doc(
+          `schools/${input.schoolId}/guardians/${message.guardianId}`,
+        ),
+        message: db.doc(
+          `schools/${input.schoolId}/smsMessages/${messageDocId}`,
+        ),
         audit: db.collection(`schools/${input.schoolId}/auditLogs`).doc(),
       };
 
       await db.runTransaction(async (transaction) => {
-        const [member, device, lease, attendance, guardian, existingMessage, ...links] = await transaction.getAll(
+        const [
+          member,
+          device,
+          lease,
+          attendance,
+          guardian,
+          existingMessage,
+          ...links
+        ] = await transaction.getAll(
           refs.member,
           refs.device,
           refs.lease,
@@ -556,54 +748,95 @@ export const ingestSmsResults = onCall(callableOptions, async (request) => {
           refs.message,
           ...candidateLinkRefs,
         );
+        if (
+          !member ||
+          !device ||
+          !lease ||
+          !attendance ||
+          !guardian ||
+          !existingMessage
+        )
+          throw new HttpsError(
+            "internal",
+            "Transaction documents are missing.",
+          );
         assertDeviceAndLease(uid, input.deviceId, device, lease);
         if (!member.exists || member.get("status") !== "ACTIVE") {
-          throw new HttpsError("permission-denied", "Active school membership is required.");
+          throw new HttpsError(
+            "permission-denied",
+            "Active school membership is required.",
+          );
         }
         if (!attendance.exists) {
           throw new HttpsError("not-found", "Attendance event was not found.");
         }
         if (attendance.get("deviceId") !== input.deviceId) {
-          throw new HttpsError("permission-denied", "Attendance event belongs to another device.");
+          throw new HttpsError(
+            "permission-denied",
+            "Attendance event belongs to another device.",
+          );
         }
-        if (attendance.get("teacherId") !== uid && !isPrivileged(member.get("role"))) {
-          throw new HttpsError("permission-denied", "Attendance event belongs to another teacher.");
+        if (
+          attendance.get("teacherId") !== uid &&
+          !isPrivileged(member.get("role"))
+        ) {
+          throw new HttpsError(
+            "permission-denied",
+            "Attendance event belongs to another teacher.",
+          );
         }
         const sectionId = attendance.get("sectionId");
         if (typeof sectionId !== "string") {
-          throw new HttpsError("failed-precondition", "Attendance event has no section scope.");
+          throw new HttpsError(
+            "failed-precondition",
+            "Attendance event has no section scope.",
+          );
         }
         assertSectionScope(member, device, sectionId);
         if (
-          !guardian.exists
-          || guardian.get("status") === "DISABLED"
-          || guardian.get("phoneStatus") !== "VERIFIED"
-          || guardian.get("consentStatus") !== "RECORDED"
+          !guardian.exists ||
+          guardian.get("status") === "DISABLED" ||
+          guardian.get("phoneStatus") !== "VERIFIED" ||
+          guardian.get("consentStatus") !== "RECORDED"
         ) {
-          throw new HttpsError("failed-precondition", "Guardian is not eligible for SMS notification.");
+          throw new HttpsError(
+            "failed-precondition",
+            "Guardian is not eligible for SMS notification.",
+          );
         }
 
         const studentId = attendance.get("studentId");
         const eventType = attendance.get("eventType");
-        const validLink = links.find((link) =>
-          link.exists
-          && link.get("studentId") === studentId
-          && link.get("guardianId") === message.guardianId
-          && !["DISABLED", "INACTIVE"].includes(String(link.get("status")))
+        const validLink = links.find(
+          (link) =>
+            link.exists &&
+            link.get("studentId") === studentId &&
+            link.get("guardianId") === message.guardianId &&
+            !["DISABLED", "INACTIVE"].includes(String(link.get("status"))),
         );
         if (!validLink) {
-          throw new HttpsError("permission-denied", "Guardian is not linked to the attendance student.");
+          throw new HttpsError(
+            "permission-denied",
+            "Guardian is not linked to the attendance student.",
+          );
         }
-        const preferenceField = eventType === "ARRIVAL"
-          ? "receiveArrivalSms"
-          : eventType === "DISMISSAL"
-            ? "receiveDismissalSms"
-            : "receiveCustomSms";
+        const preferenceField =
+          eventType === "ARRIVAL"
+            ? "receiveArrivalSms"
+            : eventType === "DISMISSAL"
+              ? "receiveDismissalSms"
+              : "receiveCustomSms";
         if (validLink.get(preferenceField) === false) {
-          throw new HttpsError("failed-precondition", "Guardian disabled this notification type.");
+          throw new HttpsError(
+            "failed-precondition",
+            "Guardian disabled this notification type.",
+          );
         }
 
-        assertSmsTransition(existingMessage.exists ? existingMessage.get("status") : undefined, message.status);
+        assertSmsTransition(
+          existingMessage.exists ? existingMessage.get("status") : undefined,
+          message.status,
+        );
         const payload = {
           messageId: messageDocId,
           localMessageId: message.messageId,
@@ -613,20 +846,32 @@ export const ingestSmsResults = onCall(callableOptions, async (request) => {
           guardianId: message.guardianId,
           sectionId,
           phoneMasked: guardian.get("phoneMasked") ?? null,
-          renderedMessage: message.renderedMessage ?? existingMessage.get("renderedMessage") ?? null,
+          renderedMessage:
+            message.renderedMessage ??
+            existingMessage.get("renderedMessage") ??
+            null,
           deviceId: input.deviceId,
           teacherId: uid,
           subscriptionFingerprint: message.subscriptionFingerprint ?? null,
           status: message.status,
           attemptCount: message.attemptCount,
-          sentAt: message.sentAt ? Timestamp.fromDate(new Date(message.sentAt)) : null,
-          deliveredAt: message.deliveredAt ? Timestamp.fromDate(new Date(message.deliveredAt)) : null,
+          sentAt: message.sentAt
+            ? Timestamp.fromDate(new Date(message.sentAt))
+            : null,
+          deliveredAt: message.deliveredAt
+            ? Timestamp.fromDate(new Date(message.deliveredAt))
+            : null,
           lastErrorCode: message.lastErrorCode ?? null,
           lastErrorMessage: message.lastErrorMessage ?? null,
           updatedAt: FieldValue.serverTimestamp(),
         };
-        if (existingMessage.exists) transaction.set(refs.message, payload, { merge: true });
-        else transaction.create(refs.message, { ...payload, createdAt: FieldValue.serverTimestamp() });
+        if (existingMessage.exists)
+          transaction.set(refs.message, payload, { merge: true });
+        else
+          transaction.create(refs.message, {
+            ...payload,
+            createdAt: FieldValue.serverTimestamp(),
+          });
         transaction.create(refs.audit, {
           type: `SMS_${message.status}`,
           actorUid: uid,
@@ -641,7 +886,11 @@ export const ingestSmsResults = onCall(callableOptions, async (request) => {
         });
       });
 
-      results.push({ messageId: message.messageId, result: "ACCEPTED", serverMessageId: messageDocId });
+      results.push({
+        messageId: message.messageId,
+        result: "ACCEPTED",
+        serverMessageId: messageDocId,
+      });
     } catch (error) {
       if (error instanceof HttpsError) {
         results.push({
@@ -665,32 +914,50 @@ export const ingestSmsResultBatch = ingestSmsResults;
 export const correctAttendance = onCall(callableOptions, async (request) => {
   const uid = requireAuth(request);
   const input = parseOrThrow(correctionSchema, request.data);
-  const eventRef = await findAttendanceRef(input.schoolId, input.attendanceEventId);
-  const correctionRef = db.collection(`schools/${input.schoolId}/attendanceCorrections`).doc();
+  const eventRef = await findAttendanceRef(
+    input.schoolId,
+    input.attendanceEventId,
+  );
+  const correctionRef = db
+    .collection(`schools/${input.schoolId}/attendanceCorrections`)
+    .doc();
   const auditRef = db.collection(`schools/${input.schoolId}/auditLogs`).doc();
 
   await db.runTransaction(async (transaction) => {
     const memberRef = db.doc(`schools/${input.schoolId}/members/${uid}`);
     const [member, event] = await transaction.getAll(memberRef, eventRef);
+    if (!member || !event)
+      throw new HttpsError("internal", "Transaction documents are missing.");
     assertPermission(member, "attendance.correct");
-    if (!event.exists) throw new HttpsError("not-found", "Attendance event was not found.");
+    if (!event.exists)
+      throw new HttpsError("not-found", "Attendance event was not found.");
     const sectionId = event.get("sectionId");
     if (typeof sectionId !== "string") {
-      throw new HttpsError("failed-precondition", "Attendance event has no section scope.");
+      throw new HttpsError(
+        "failed-precondition",
+        "Attendance event has no section scope.",
+      );
     }
     if (!isPrivileged(member.get("role"))) {
-      const allowed = new Set(strings(member.get("allowedSectionIds")));
+      const allowed = new Set(strings(member.get("sectionIds")));
       if (!allowed.has(sectionId)) {
-        throw new HttpsError("permission-denied", "Attendance event is outside your section scope.");
+        throw new HttpsError(
+          "permission-denied",
+          "Attendance event is outside your section scope.",
+        );
       }
     }
 
-    const dailyId = sha256(`${input.schoolId}|${event.get("studentId")}|${event.get("localSchoolDate")}`);
-    const dailyRef = db.doc(`schools/${input.schoolId}/attendanceDays/${dailyId}`);
+    const dailyId = sha256(
+      `${input.schoolId}|${event.get("studentId")}|${event.get("localSchoolDate")}`,
+    );
+    const dailyRef = db.doc(
+      `schools/${input.schoolId}/attendanceDays/${dailyId}`,
+    );
     const daily = await transaction.get(dailyRef);
     const previousEffectiveStatus = daily.exists
-      ? daily.get("effectiveStatus") ?? daily.get("status") ?? null
-      : event.get("status") ?? null;
+      ? (daily.get("effectiveStatus") ?? daily.get("status") ?? null)
+      : (event.get("status") ?? null);
 
     transaction.create(correctionRef, {
       correctionId: correctionRef.id,
@@ -704,21 +971,29 @@ export const correctAttendance = onCall(callableOptions, async (request) => {
       correctedBy: uid,
       createdAt: FieldValue.serverTimestamp(),
     });
-    transaction.set(dailyRef, {
-      schoolId: input.schoolId,
-      studentId: event.get("studentId"),
-      sectionId,
-      localSchoolDate: event.get("localSchoolDate"),
-      effectiveStatus: input.correctedStatus,
-      latestCorrectionId: correctionRef.id,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-    transaction.set(eventRef, {
-      hasCorrection: true,
-      latestCorrectionId: correctionRef.id,
-      effectiveStatus: input.correctedStatus,
-      correctedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    transaction.set(
+      dailyRef,
+      {
+        schoolId: input.schoolId,
+        studentId: event.get("studentId"),
+        sectionId,
+        localSchoolDate: event.get("localSchoolDate"),
+        effectiveStatus: input.correctedStatus,
+        latestCorrectionId: correctionRef.id,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    transaction.set(
+      eventRef,
+      {
+        hasCorrection: true,
+        latestCorrectionId: correctionRef.id,
+        effectiveStatus: input.correctedStatus,
+        correctedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
     transaction.create(auditRef, {
       type: "ATTENDANCE_CORRECTED",
       actorUid: uid,

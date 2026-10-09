@@ -1,9 +1,13 @@
 
 package com.pixeeee.schoolnfc.database
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+
+@Entity(tableName = "sections")
+data class SectionEntity(@PrimaryKey val id: String, val name: String)
 
 @Entity(tableName = "students", indices = [Index("studentNumber"), Index("sectionId"), Index("displayName")])
 data class StudentEntity(
@@ -83,6 +87,7 @@ data class AttendanceEventEntity(
     val schoolId: String,
     val studentId: String,
     val cardId: String,
+    @ColumnInfo(defaultValue = "'NFC'") val source: String = "NFC",
     val eventType: String,
     val status: String,
     val localSchoolDate: String,

@@ -1,12 +1,22 @@
-
 import { z } from "zod";
 import {
-  ATTENDANCE_EVENT_TYPES, CARD_STATUSES, DEVICE_STATUSES, MEMBER_STATUSES, PERMISSIONS, ROLES, SMS_STATUSES,
+  ATTENDANCE_EVENT_TYPES,
+  CARD_STATUSES,
+  DEVICE_STATUSES,
+  MEMBER_STATUSES,
+  PERMISSIONS,
+  ROLES,
+  SMS_STATUSES,
 } from "./domain.js";
 import { normalizePhilippineMobile } from "./phone.js";
 import { validateSmsTemplate } from "./sms.js";
 
-export const idSchema = z.string().trim().min(3).max(128).regex(/^[A-Za-z0-9_-]+$/);
+export const idSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/);
 export const schoolIdSchema = idSchema;
 export const emailSchema = z.string().trim().toLowerCase().email().max(254);
 export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -19,16 +29,34 @@ export const cardStatusSchema = z.enum(CARD_STATUSES);
 export const attendanceEventTypeSchema = z.enum(ATTENDANCE_EVENT_TYPES);
 export const smsStatusSchema = z.enum(SMS_STATUSES);
 
-export const personNameSchema = z.string().trim().min(1).max(80).regex(/^[\p{L}\p{M} .'-]+$/u, "Name contains unsupported characters.");
-export const optionalPersonNameSchema = z.union([personNameSchema, z.literal("")]).optional();
+export const personNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .regex(/^[\p{L}\p{M} .'-]+$/u, "Name contains unsupported characters.");
+export const optionalPersonNameSchema = z
+  .union([personNameSchema, z.literal("")])
+  .optional();
 export const philippineMobileSchema = z.string().transform((value, context) => {
-  try { return normalizePhilippineMobile(value); }
-  catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid phone number." }); return z.NEVER; }
+  try {
+    return normalizePhilippineMobile(value);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "Invalid phone number.",
+    });
+    return z.NEVER;
+  }
 });
 
 export const createSchoolSchema = z.object({
   name: z.string().trim().min(2).max(120),
-  publicCode: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{6,12}$/),
+  publicCode: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{6,12}$/),
   timeZone: z.string().trim().min(3).max(64).default("Asia/Manila"),
 });
 
@@ -41,11 +69,18 @@ export const inviteMemberSchema = z.object({
   sectionIds: z.array(idSchema).max(100).default([]),
 });
 
-export const acceptInvitationSchema = z.object({ invitationToken: z.string().min(32).max(256) });
+export const acceptInvitationSchema = z.object({
+  invitationToken: z.string().min(32).max(256),
+});
 
 export const createStudentSchema = z.object({
   schoolId: schoolIdSchema,
-  studentNumber: z.string().trim().min(2).max(40).regex(/^[A-Za-z0-9/_-]+$/),
+  studentNumber: z
+    .string()
+    .trim()
+    .min(2)
+    .max(40)
+    .regex(/^[A-Za-z0-9/_-]+$/),
   firstName: personNameSchema,
   middleName: optionalPersonNameSchema,
   lastName: personNameSchema,
@@ -54,17 +89,26 @@ export const createStudentSchema = z.object({
   gradeLevelId: idSchema,
   sectionId: idSchema,
   academicYearId: idSchema,
-  status: z.enum(["ACTIVE", "INACTIVE", "GRADUATED", "TRANSFERRED", "ARCHIVED"]).default("ACTIVE"),
+  status: z
+    .enum(["ACTIVE", "INACTIVE", "GRADUATED", "TRANSFERRED", "ARCHIVED"])
+    .default("ACTIVE"),
 });
 
-export const updateStudentSchema = createStudentSchema.partial().required({ schoolId: true }).extend({ studentId: idSchema });
+export const updateStudentSchema = createStudentSchema
+  .partial()
+  .required({ schoolId: true })
+  .extend({ studentId: idSchema });
 
 export const createGuardianSchema = z.object({
   schoolId: schoolIdSchema,
   displayName: personNameSchema,
   phone: philippineMobileSchema,
-  phoneStatus: z.enum(["UNVERIFIED", "VERIFIED", "INVALID", "DISABLED"]).default("UNVERIFIED"),
-  consentStatus: z.enum(["PENDING", "RECORDED", "WITHDRAWN", "NOT_REQUIRED"]).default("PENDING"),
+  phoneStatus: z
+    .enum(["UNVERIFIED", "VERIFIED", "INVALID", "DISABLED"])
+    .default("UNVERIFIED"),
+  consentStatus: z
+    .enum(["PENDING", "RECORDED", "WITHDRAWN", "NOT_REQUIRED"])
+    .default("PENDING"),
 });
 
 export const linkGuardianSchema = z.object({
@@ -97,25 +141,38 @@ export const approveDeviceSchema = z.object({
   leaseHours: z.number().int().min(1).max(168).default(24),
 });
 
-export const deviceLeaseSchema = z.object({ schoolId: schoolIdSchema, deviceId: idSchema });
-
-export const reserveCardSchema = z.object({
+export const deviceLeaseSchema = z.object({
   schoolId: schoolIdSchema,
   deviceId: idSchema,
-  leaseId: idSchema,
-  studentId: idSchema,
-  operation: z.enum(["NEW", "REPLACE"]).default("NEW"),
-  replacedCardId: idSchema.optional(),
-}).superRefine((value, context) => {
-  if (value.operation === "REPLACE" && !value.replacedCardId) context.addIssue({ code: "custom", path: ["replacedCardId"], message: "The replaced card is required." });
 });
+
+export const reserveCardSchema = z
+  .object({
+    schoolId: schoolIdSchema,
+    deviceId: idSchema,
+    leaseId: idSchema,
+    studentId: idSchema,
+    operation: z.enum(["NEW", "REPLACE"]).default("NEW"),
+    replacedCardId: idSchema.optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.operation === "REPLACE" && !value.replacedCardId)
+      context.addIssue({
+        code: "custom",
+        path: ["replacedCardId"],
+        message: "The replaced card is required.",
+      });
+  });
 
 export const activateCardSchema = z.object({
   schoolId: schoolIdSchema,
   deviceId: idSchema,
   leaseId: idSchema,
   reservationId: idSchema,
-  tagUidHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  tagUidHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   tagTechnologies: z.array(z.string().trim().min(1).max(80)).max(20),
   capacityBytes: z.number().int().min(1).max(32768),
 });
@@ -127,19 +184,35 @@ export const changeCardStatusSchema = z.object({
   reason: z.string().trim().min(5).max(500),
 });
 
-export const attendanceEventInputSchema = z.object({
-  eventUuid: z.string().uuid(),
-  idempotencyKey: z.string().min(10).max(500),
-  studentId: idSchema,
-  cardId: idSchema,
-  eventType: attendanceEventTypeSchema,
-  localSchoolDate: isoDateSchema,
-  localTimestamp: isoDateTimeSchema,
-  timezone: z.string().min(3).max(64),
-  clockTrust: z.enum(["TRUSTED", "UNTRUSTED", "UNKNOWN"]),
-  scannerSessionId: idSchema,
-  smsExpectedCount: z.number().int().min(0).max(10),
-});
+export const attendanceEventInputSchema = z
+  .object({
+    eventUuid: z.string().uuid(),
+    idempotencyKey: z.string().min(10).max(500),
+    studentId: idSchema,
+    cardId: idSchema.optional(),
+    source: z.enum(["NFC", "MANUAL"]).default("NFC"),
+    eventType: attendanceEventTypeSchema,
+    localSchoolDate: isoDateSchema,
+    localTimestamp: isoDateTimeSchema,
+    timezone: z.string().min(3).max(64),
+    clockTrust: z.enum(["TRUSTED", "UNTRUSTED", "UNKNOWN"]),
+    scannerSessionId: idSchema,
+    smsExpectedCount: z.number().int().min(0).max(10),
+  })
+  .superRefine((event, context) => {
+    if (event.source === "NFC" && !event.cardId)
+      context.addIssue({
+        code: "custom",
+        path: ["cardId"],
+        message: "NFC attendance requires a card.",
+      });
+    if (event.source === "MANUAL" && event.eventType !== "ARRIVAL")
+      context.addIssue({
+        code: "custom",
+        path: ["eventType"],
+        message: "Manual roll call records presence only.",
+      });
+  });
 
 export const ingestAttendanceBatchSchema = z.object({
   schoolId: schoolIdSchema,
@@ -173,16 +246,29 @@ export const smsTemplateSchema = z.object({
   templateId: idSchema.optional(),
   eventType: attendanceEventTypeSchema,
   name: z.string().trim().min(2).max(80),
-  body: z.string().trim().min(1).max(480).superRefine((value, context) => {
-    for (const error of validateSmsTemplate(value).errors) context.addIssue({ code: "custom", message: error });
-  }),
+  body: z
+    .string()
+    .trim()
+    .min(1)
+    .max(480)
+    .superRefine((value, context) => {
+      for (const error of validateSmsTemplate(value).errors)
+        context.addIssue({ code: "custom", message: error });
+    }),
   enabled: z.boolean().default(true),
 });
 
 export const correctAttendanceSchema = z.object({
   schoolId: schoolIdSchema,
   eventId: idSchema,
-  correctedStatus: z.enum(["PRESENT", "LATE", "DISMISSED", "ABSENT", "EXCUSED", "VOIDED"]),
+  correctedStatus: z.enum([
+    "PRESENT",
+    "LATE",
+    "DISMISSED",
+    "ABSENT",
+    "EXCUSED",
+    "VOIDED",
+  ]),
   correctedTimestamp: isoDateTimeSchema.optional(),
   reason: z.string().trim().min(10).max(1000),
 });
@@ -191,8 +277,15 @@ export const snapshotRequestSchema = z.object({
   schoolId: schoolIdSchema,
   deviceId: idSchema,
   leaseId: idSchema,
-  kind: z.enum(["CONFIG", "STUDENTS", "CARDS", "GUARDIANS", "TEMPLATES"]),
-  cursor: z.string().max(500).optional(),
+  kind: z.enum([
+    "CONFIG",
+    "SECTIONS",
+    "STUDENTS",
+    "CARDS",
+    "GUARDIANS",
+    "TEMPLATES",
+  ]),
+  cursor: z.string().max(500).nullable().optional(),
   pageSize: z.number().int().min(1).max(500).default(250),
 });
 

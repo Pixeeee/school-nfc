@@ -4,6 +4,9 @@ package com.pixeeee.schoolnfc.attendance
 import android.content.Context
 import android.os.SystemClock
 import androidx.room.withTransaction
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import com.pixeeee.schoolnfc.database.StudentEntity
 import com.google.firebase.auth.FirebaseAuth
 import com.pixeeee.schoolnfc.database.AppDatabase
 import com.pixeeee.schoolnfc.database.AttendanceEventEntity
@@ -26,11 +29,13 @@ class AttendanceRepository(
     private val database: AppDatabase,
     private val preferences: DevicePreferences,
 ) {
+    private val recordMutex = Mutex()
     private val debounce = ConcurrentHashMap<String, Long>()
     @Volatile private var activeSession: ActiveScannerSession? = null
 
     suspend fun startSession(schoolId: String, mode: String, sectionId: String?, customLabel: String?): ActiveScannerSession {
         require(preferences.deviceStatus == "APPROVED" && preferences.leaseValid()) { "Device authorization is missing or expired." }
+        require(schoolId == preferences.schoolId) { "This phone belongs to another school." }
         require(mode in setOf("ARRIVAL", "DISMISSAL", "CUSTOM")) { "Unsupported scanner mode." }
         val uid = requireNotNull(FirebaseAuth.getInstance().currentUser?.uid) { "Sign in is required." }
         val session = ActiveScannerSession(UUID.randomUUID().toString(), schoolId, mode, sectionId, customLabel)
@@ -45,7 +50,9 @@ class AttendanceRepository(
         debounce.clear()
     }
 
-    suspend fun processPayload(rawPayload: String, tagUidHash: String?): ScanOutcome {
+    suspend fun processPayload(rawPayload: String, tagUidHash: String?): ScanOutcome = recordMutex.withLock { processNfcPayload(rawPayload, tagUidHash) }
+
+    private suspend fun processNfcPayload(rawPayload: String, tagUidHash: String?): ScanOutcome {
         val now = System.currentTimeMillis()
         val timestamp = Instant.ofEpochMilli(now).toString()
         val session = activeSession ?: return rejected(timestamp, "No scanner session is active.")
@@ -64,9 +71,26 @@ class AttendanceRepository(
         if (student.status != "ACTIVE") return rejected(timestamp, "Student is not active.")
         if (session.sectionId != null && student.sectionId != session.sectionId) return rejected(timestamp, "Student is outside this scanner session's section.")
 
-        val zone = ZoneId.systemDefault()
-        val localDate = LocalDate.ofInstant(Instant.ofEpochMilli(now), zone).toString()
-        val key = listOf(session.schoolId, student.id, localDate, session.mode).joinToString("|")
+        return recordStudent(session, student, card.id, "NFC", now)
+    }
+
+    suspend fun markPresent(schoolId: String, studentId: String, sectionId: String): ScanOutcome = recordMutex.withLock {
+        require(schoolId == preferences.schoolId) { "This phone belongs to another school." }
+        require(preferences.deviceStatus == "APPROVED" && preferences.leaseValid()) { "Renew this phone's authorization before taking attendance." }
+        val uid = requireNotNull(FirebaseAuth.getInstance().currentUser?.uid) { "Sign in is required." }
+        val student = requireNotNull(database.students().byId(studentId)) { "Synchronize this section's students first." }
+        require(student.sectionId == sectionId) { "Student is outside this section." }
+        AttendancePolicy.manualRejection(student.status, student.sectionId, preferences.allowedSectionIds)?.let { error(it) }
+        val session = ActiveScannerSession(UUID.randomUUID().toString(), schoolId, "ARRIVAL", sectionId, null)
+        database.scannerSessions().insert(ScannerSessionEntity(session.id, schoolId, "ARRIVAL", sectionId, null, uid, System.currentTimeMillis()))
+        recordStudent(session, student, "", "MANUAL", System.currentTimeMillis())
+    }
+
+    private suspend fun recordStudent(session: ActiveScannerSession, student: StudentEntity, cardId: String, source: String, now: Long): ScanOutcome {
+        val timestamp = Instant.ofEpochMilli(now).toString()
+        val zone = ZoneId.of(preferences.schoolTimeZone)
+        val localDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString()
+        val key = AttendancePolicy.key(session.schoolId, student.id, localDate, session.mode)
         val existing = database.attendance().byIdempotencyKey(key)
         if (existing != null) return ScanOutcome("DUPLICATE", timestamp, existing.eventUuid, student.id, student.displayName, student.studentNumber, session.mode, "Attendance was already recorded for this mode today.", existing.smsExpectedCount, student.photoPath)
 
@@ -76,11 +100,13 @@ class AttendanceRepository(
             "DISMISSAL" -> route.receiveDismissalSms
             else -> route.receiveCustomSms
         } }
-        val template = database.smsTemplates().byEventType(session.mode)
+        val template = if (source == "MANUAL") com.pixeeee.schoolnfc.database.SmsTemplateEntity(
+            "manual_presence", "ARRIVAL", "Roll call notice", "{{schoolName}}: {{studentName}} is present on {{eventDate}} at {{eventTime}}.", true
+        ) else database.smsTemplates().byEventType(session.mode)
         val eligibleRoutes = if (template?.enabled == true) routes else emptyList()
         val status = if (session.mode == "DISMISSAL") "DISMISSED" else "PRESENT"
         val event = AttendanceEventEntity(
-            eventUuid = eventUuid, idempotencyKey = key, schoolId = session.schoolId, studentId = student.id, cardId = card.id,
+            eventUuid = eventUuid, idempotencyKey = key, schoolId = session.schoolId, studentId = student.id, cardId = cardId, source = source,
             eventType = session.mode, status = status, localSchoolDate = localDate, localTimestamp = timestamp,
             elapsedRealtimeMs = SystemClock.elapsedRealtime(), timezone = zone.id, clockTrust = "UNKNOWN",
             deviceId = preferences.deviceId, teacherId = FirebaseAuth.getInstance().currentUser!!.uid,
@@ -116,7 +142,7 @@ class AttendanceRepository(
 
     private fun render(template: String, values: Map<String, String>): String {
         var result = template
-        for ((key, value) in values) result = result.replace(Regex("\\{\\{\\s*$key\\s*}}"), value)
+        for ((key, value) in values) result = result.replace(Regex("\\{\\{\\s*$key\\s*\\}\\}"), value)
         return result.trim()
     }
 

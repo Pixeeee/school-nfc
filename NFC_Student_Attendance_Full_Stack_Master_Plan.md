@@ -1,4 +1,5 @@
 # NFC Student Attendance and Parent SMS
+
 ## Full-Stack Master Implementation Plan
 
 **Plan version:** 1.0  
@@ -97,36 +98,36 @@ A browser-only React application is not sufficient for reliable NFC writing, SIM
 
 Exact dependency versions must be pinned in lockfiles at implementation kickoff and updated only through reviewed dependency pull requests.
 
-| Area | Baseline |
-|---|---|
-| Monorepo | pnpm workspaces + Turborepo |
-| Admin UI | React 19.x, TypeScript, Vite |
-| Mobile UI | React 19.x, TypeScript, Vite |
-| Native wrapper | Capacitor 8 |
-| Android native code | Kotlin, latest stable Android toolchain |
-| Android minimum | `minSdk 26` unless pilot hardware requires a higher floor |
-| Android target | Latest stable target SDK required at release time |
-| Local database | Room |
+| Area                 | Baseline                                                       |
+| -------------------- | -------------------------------------------------------------- |
+| Monorepo             | pnpm workspaces + Turborepo                                    |
+| Admin UI             | React 19.x, TypeScript, Vite                                   |
+| Mobile UI            | React 19.x, TypeScript, Vite                                   |
+| Native wrapper       | Capacitor 8                                                    |
+| Android native code  | Kotlin, latest stable Android toolchain                        |
+| Android minimum      | `minSdk 26` unless pilot hardware requires a higher floor      |
+| Android target       | Latest stable target SDK required at release time              |
+| Local database       | Room                                                           |
 | Immediate processing | Kotlin coroutines + controlled in-app/foreground queue service |
-| Persistent recovery | WorkManager |
-| Forms | React Hook Form |
-| Shared validation | Zod |
-| Server state | TanStack Query |
-| Local React UI state | Zustand or narrowly scoped React state |
-| Routing | React Router |
-| Admin tables | TanStack Table |
-| Styling | Tailwind CSS + shared accessible component library |
-| Cloud auth | Firebase Authentication |
-| Cloud database | Cloud Firestore |
-| Backend | Cloud Functions for Firebase, TypeScript |
-| Files | Cloud Storage for Firebase |
-| Web deployment | Firebase Hosting |
-| Abuse protection | Firebase App Check, device authorization, rate controls |
-| Monitoring | Firebase Crashlytics, Performance Monitoring, structured logs |
-| Web tests | Vitest, Testing Library, Playwright |
-| Firebase tests | Emulator Suite + Security Rules tests |
-| Android tests | JUnit, Room tests, WorkManager tests, instrumentation tests |
-| CI/CD | GitHub Actions or equivalent |
+| Persistent recovery  | WorkManager                                                    |
+| Forms                | React Hook Form                                                |
+| Shared validation    | Zod                                                            |
+| Server state         | TanStack Query                                                 |
+| Local React UI state | Zustand or narrowly scoped React state                         |
+| Routing              | React Router                                                   |
+| Admin tables         | TanStack Table                                                 |
+| Styling              | Tailwind CSS + shared accessible component library             |
+| Cloud auth           | Firebase Authentication                                        |
+| Cloud database       | Cloud Firestore                                                |
+| Backend              | Cloud Functions for Firebase, TypeScript                       |
+| Files                | Cloud Storage for Firebase                                     |
+| Web deployment       | Firebase Hosting                                               |
+| Abuse protection     | Firebase App Check, device authorization, rate controls        |
+| Monitoring           | Firebase Crashlytics, Performance Monitoring, structured logs  |
+| Web tests            | Vitest, Testing Library, Playwright                            |
+| Firebase tests       | Emulator Suite + Security Rules tests                          |
+| Android tests        | JUnit, Room tests, WorkManager tests, instrumentation tests    |
+| CI/CD                | GitHub Actions or equivalent                                   |
 
 ---
 
@@ -638,17 +639,17 @@ Show CARD ACTIVATED
 
 ### Failure behavior
 
-| Failure | Required behavior |
-|---|---|
-| Card removed during write | Mark attempt failed; do not activate |
-| Unsupported tag | Show supported-card guidance |
-| Insufficient capacity | Refuse write |
-| Read-only tag | Refuse rewrite; allow read/test only |
-| Existing active school card | Require explicit replace/reassign workflow |
-| Foreign payload | Do not overwrite without privileged confirmation |
+| Failure                                   | Required behavior                                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------------------------- |
+| Card removed during write                 | Mark attempt failed; do not activate                                               |
+| Unsupported tag                           | Show supported-card guidance                                                       |
+| Insufficient capacity                     | Refuse write                                                                       |
+| Read-only tag                             | Refuse rewrite; allow read/test only                                               |
+| Existing active school card               | Require explicit replace/reassign workflow                                         |
+| Foreign payload                           | Do not overwrite without privileged confirmation                                   |
 | Write succeeds but cloud activation fails | Keep card in `WRITE_PENDING`; retry activation; attendance rejects it until active |
-| App closes mid-process | Reservation can be resumed or expires safely |
-| Verification mismatch | Do not activate; offer rewrite |
+| App closes mid-process                    | Reservation can be resumed or expires safely                                       |
+| Verification mismatch                     | Do not activate; offer rewrite                                                     |
 
 Attendance mode must never write to a tag.
 
@@ -1834,32 +1835,32 @@ Exports must record who generated the export and its filter criteria.
 
 ## 25. Loopholes and Required Mitigations
 
-| Risk | Mitigation |
-|---|---|
-| Student gives card to another student | Display student photo/name; teacher-supervised scanning |
-| Basic card is cloned | Random token, optional UID mismatch warning, lost/replaced revocation, secure-tag upgrade path |
-| Same card held near phone | Per-card debounce |
-| Same card tapped again later | Attendance idempotency |
-| Two devices scan same student | Cloud idempotency and reconciliation |
-| Arrival scan followed by student leaving | Controlled Dismissal process; system is attendance evidence, not continuous presence proof |
-| Parent number stored on card | Never store PII on NFC |
-| Wrong parent number | Registrar verification status and correction workflow |
-| SMS is sent twice | SMS idempotency key and unique local constraint |
-| SMS fails but attendance is lost | Attendance and SMS are separate durable records |
-| App is killed | Room outboxes and WorkManager recovery |
-| Phone restarts | Queue reconciliation on boot/app start |
-| No internet | Local attendance and SMS continue; Firebase sync waits |
-| No cellular signal | Attendance continues; SMS waits |
-| Teacher changes phone time | Clock trust state, server offset, reconciliation |
-| Lost card | Disable/replace immediately |
-| Lost phone | Revoke device; short offline lease; local wipe after reconnect |
-| Unauthorized NFC write | Separate writer mode and permission |
-| Active card overwritten | Inspect and block unless privileged workflow |
-| Carrier blocks high-volume messages | Rate safeguards, queue visibility, carrier-plan review |
-| Sensitive data exposed on teacher screen | Masking, role scope, short display, screenshot protection option |
-| Revoked offline device continues | Expiring authorization lease |
-| React UI freezes | Native scanner path operates independently |
-| Firebase trigger repeats | Idempotent Functions and unique event keys |
+| Risk                                     | Mitigation                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Student gives card to another student    | Display student photo/name; teacher-supervised scanning                                        |
+| Basic card is cloned                     | Random token, optional UID mismatch warning, lost/replaced revocation, secure-tag upgrade path |
+| Same card held near phone                | Per-card debounce                                                                              |
+| Same card tapped again later             | Attendance idempotency                                                                         |
+| Two devices scan same student            | Cloud idempotency and reconciliation                                                           |
+| Arrival scan followed by student leaving | Controlled Dismissal process; system is attendance evidence, not continuous presence proof     |
+| Parent number stored on card             | Never store PII on NFC                                                                         |
+| Wrong parent number                      | Registrar verification status and correction workflow                                          |
+| SMS is sent twice                        | SMS idempotency key and unique local constraint                                                |
+| SMS fails but attendance is lost         | Attendance and SMS are separate durable records                                                |
+| App is killed                            | Room outboxes and WorkManager recovery                                                         |
+| Phone restarts                           | Queue reconciliation on boot/app start                                                         |
+| No internet                              | Local attendance and SMS continue; Firebase sync waits                                         |
+| No cellular signal                       | Attendance continues; SMS waits                                                                |
+| Teacher changes phone time               | Clock trust state, server offset, reconciliation                                               |
+| Lost card                                | Disable/replace immediately                                                                    |
+| Lost phone                               | Revoke device; short offline lease; local wipe after reconnect                                 |
+| Unauthorized NFC write                   | Separate writer mode and permission                                                            |
+| Active card overwritten                  | Inspect and block unless privileged workflow                                                   |
+| Carrier blocks high-volume messages      | Rate safeguards, queue visibility, carrier-plan review                                         |
+| Sensitive data exposed on teacher screen | Masking, role scope, short display, screenshot protection option                               |
+| Revoked offline device continues         | Expiring authorization lease                                                                   |
+| React UI freezes                         | Native scanner path operates independently                                                     |
+| Firebase trigger repeats                 | Idempotent Functions and unique event keys                                                     |
 
 ---
 

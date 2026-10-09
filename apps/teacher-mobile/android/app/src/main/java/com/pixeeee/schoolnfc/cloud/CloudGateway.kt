@@ -24,7 +24,7 @@ class CloudGateway(private val preferences: DevicePreferences) {
     fun currentUser() = auth.currentUser
 
     @Suppress("UNCHECKED_CAST")
-    private suspend fun call(name: String, data: Map<String, Any?>): Map<String, Any?> {
+    suspend fun call(name: String, data: Map<String, Any?>): Map<String, Any?> {
         val result = functions.getHttpsCallable(name).call(data).await().data
         return result as? Map<String, Any?> ?: error("Cloud Function $name returned an invalid response.")
     }
@@ -49,6 +49,7 @@ class CloudGateway(private val preferences: DevicePreferences) {
         val result = call("renewDeviceLease", mapOf("schoolId" to schoolId, "deviceId" to preferences.deviceId))
         preferences.schoolId = schoolId
         preferences.deviceStatus = "APPROVED"
+        preferences.allowedSectionIds = (result["sectionIds"] as? List<*>)?.filterIsInstance<String>()?.toSet() ?: emptySet()
         preferences.leaseId = result["leaseId"]?.toString()
         preferences.leaseExpiresAt = result["expiresAt"]?.toString()
         return result
@@ -82,11 +83,11 @@ class CloudGateway(private val preferences: DevicePreferences) {
             "schoolId" to schoolId, "deviceId" to preferences.deviceId, "leaseId" to requireNotNull(preferences.leaseId),
             "batchId" to UUID.randomUUID().toString(),
             "events" to events.map { e -> mapOf(
-                "eventUuid" to e.eventUuid, "idempotencyKey" to e.idempotencyKey, "studentId" to e.studentId, "cardId" to e.cardId,
+                "eventUuid" to e.eventUuid, "idempotencyKey" to e.idempotencyKey, "studentId" to e.studentId, "cardId" to e.cardId.takeIf { e.source == "NFC" }, "source" to e.source,
                 "eventType" to e.eventType, "localSchoolDate" to e.localSchoolDate, "localTimestamp" to e.localTimestamp,
                 "timezone" to e.timezone, "clockTrust" to e.clockTrust, "scannerSessionId" to e.scannerSessionId,
                 "smsExpectedCount" to e.smsExpectedCount,
-            ) },
+            ).filterValues { it != null } },
         ))
     }
 
