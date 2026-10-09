@@ -36,4 +36,4 @@ build:
     - eas/upload_artifact:
         inputs:
           type: application-archive
-          path: android/app/build/outputs/apk/release/*.apk
+          path: apps/teacher-mobile/android/app/build/outputs/apk/release/*.apk
