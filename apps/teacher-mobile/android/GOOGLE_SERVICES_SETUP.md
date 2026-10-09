@@ -3,7 +3,7 @@
 Create an Android app in each Firebase project using application ID:
 
 ```text
-com.pixeeee.schoolnfc
+com.example.attendance_check
 ```
 
 Download that environment's `google-services.json` and place it at:

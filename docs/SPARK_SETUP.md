@@ -6,7 +6,7 @@ This deployment uses Firebase Spark without a billing account. Authentication an
 
 - Firebase: `schoolattendance-16d6d`
 - Expo: `pixeee/attendance-check`
-- Android package: `com.pixeeee.schoolnfc`
+- Android package: `com.example.attendance_check`
 
 Keep Firebase on Spark and Expo on Free. Firebase may stop serving when its free quotas are exhausted. Expo cloud builds have a free quota and queue; wait for reset rather than upgrading. This configuration does not enable billing.
 

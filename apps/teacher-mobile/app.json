@@ -4,7 +4,7 @@
     "slug": "attendance-check",
     "version": "1.0.0",
     "android": {
-      "package": "com.pixeeee.schoolnfc"
+      "package": "com.example.attendance_check"
     },
     "owner": "pixeee"
   }

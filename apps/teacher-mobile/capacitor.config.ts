@@ -1,6 +1,6 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 const config: CapacitorConfig = {
-  appId: "com.pixeeee.schoolnfc",
+  appId: "com.example.attendance_check",
   appName: "School NFC Teacher",
   webDir: "dist",
   android: { allowMixedContent: false, backgroundColor: "#102b24" },
