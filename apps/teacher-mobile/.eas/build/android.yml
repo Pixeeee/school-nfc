@@ -32,7 +32,7 @@ build:
     - run:
         name: Test and build standalone Android APK
         working_directory: android
-        command: ./gradlew --no-daemon testReleaseUnitTest assembleRelease
+        command: ./gradlew --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" testReleaseUnitTest assembleRelease
     - eas/upload_artifact:
         inputs:
           type: application-archive
