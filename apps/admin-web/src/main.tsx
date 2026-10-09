@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import { SparkPortal } from "./SparkPortal";
 import { AuthProvider } from "./auth/AuthProvider";
 import { configStatus } from "./config";
 import "./styles.css";
@@ -33,9 +34,13 @@ if (!configStatus.configured) {
     <StrictMode>
       <QueryClientProvider client={client}>
         <BrowserRouter>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
+          {configStatus.value.VITE_BACKEND === "SPARK" ? (
+            <SparkPortal />
+          ) : (
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          )}
         </BrowserRouter>
       </QueryClientProvider>
     </StrictMode>,

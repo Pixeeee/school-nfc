@@ -23,6 +23,7 @@ firebase-debug.log*
 firestore-debug.log*
 ui-debug.log*
 .firebaserc
+.vercel/
 
 # Android local and sensitive files
 apps/teacher-mobile/android/.gradle/

@@ -87,8 +87,18 @@ const secretPatterns = [
   [/xox[baprs]-[A-Za-z0-9-]{20,}/, "Slack token"],
 ];
 
+const sourceFiles = new Set(
+  execFileSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard"],
+    { cwd: root, encoding: "utf8" },
+  )
+    .trim()
+    .split("\n"),
+);
 for (const file of walk(root)) {
   const rel = relative(root, file).replaceAll("\\", "/");
+  if (!sourceFiles.has(rel)) continue;
   if (
     rel.endsWith(".example") ||
     rel.includes("/fixtures/") ||
@@ -223,7 +233,11 @@ for (const excessive of [
 }
 
 const gradle = read("apps/teacher-mobile/android/app/build.gradle");
-if (gradle.includes("com.example"))
+// This exact package is the user's registered Firebase Android application.
+if (
+  gradle.includes("com.example") &&
+  !gradle.includes("applicationId 'com.example.attendance_check'")
+)
   fail("Android application ID still uses com.example.");
 if (!gradle.includes("com.pixeeee.schoolnfc"))
   fail("Android application ID is not set to com.pixeeee.schoolnfc.");
