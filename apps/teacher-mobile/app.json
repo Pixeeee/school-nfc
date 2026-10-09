@@ -6,6 +6,11 @@
     "android": {
       "package": "com.example.attendance_check"
     },
-    "owner": "pixeee"
+    "owner": "pixeee",
+    "extra": {
+      "eas": {
+        "projectId": "9d8e772f-8e5d-45e0-bea5-c8dcd59651e0"
+      }
+    }
   }
 }
