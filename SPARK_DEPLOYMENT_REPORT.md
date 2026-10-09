@@ -23,12 +23,18 @@ The Expo custom-native build retains Capacitor, Room, WorkManager and the Kotlin
 
 Total: 57 distinct automated tests passed. Physical SMS was not sent during testing.
 
-## Live deployment pending
+## Expo APK published
 
-Firebase CLI reports no authorized accounts. EAS CLI reports Not logged in. The supplied configuration is for a web app, not the Android registration. No Firebase rules, school records or Expo cloud build have been deployed to the target accounts. No billing account has been enabled or linked.
+Expo build `4b631820-68cb-468f-8d2c-ce7a510c709f` succeeded on October 9, 2026. The existing project UUID is `9d8e772f-8e5d-45e0-bea5-c8dcd59651e0`; no duplicate project was created. The build runs release unit tests and assembles a signed APK, using the supplied Firebase Android registration for `com.example.attendance_check`. The published APK was downloaded and its v2 signature verified. Release signing files/passwords are stored as secret preview environment variables, outside source control. No billing account was enabled or linked.
 
-To finish, sign in locally to Firebase and Expo, register the Android app `com.pixeeee.schoolnfc`, provide its google-services.json, and link the existing Expo project UUID. The trusted local administrator setup also needs appropriate administrator credentials and the school/teacher Auth accounts. A release keystore and EAS file/string secrets are required for the signed downloadable APK. Instructions are in [Spark setup](docs/SPARK_SETUP.md).
+[Install from Expo](https://expo.dev/accounts/pixeee/projects/attendance-check/builds/4b631820-68cb-468f-8d2c-ce7a510c709f). [Direct APK](https://expo.dev/artifacts/eas/fWL_kxEmYchZkwPG19m8QdeEMFlOhfZBqqKoJbEoPGs.apk). Expo reports this artifact expires October 23, 2026. A local copy is also saved as `../school-attendance-expo.apk`. Uninstall the earlier debug app before installing this release because its signing key differs; preserve any needed local attendance evidence first.
 
-The supplied local Spark debug APK is an unconfigured test artifact and shows connection-required guidance until rebuilt with the Android Firebase configuration. It is not a live school service. Cloud EAS custom-build execution and release signing remain unverified until account configuration is complete.
+EAS custom-build execution exposed three integration issues, now fixed: repeated/compact Gradle defaultConfig blocks confused package detection, worker JVM defaults included the obsolete MaxPermSize flag, and artifact upload paths resolve from the monorepo root. The successful cloud build includes all three corrections.
+
+## Firebase administration pending
+
+The APK includes the correct Firebase connection. Live Firebase rules, Email/Password Auth, school records, teacher memberships and device approval have not been verified in the target project. Firebase CLI previously reported no authorized account. Trusted administrator credentials are still required to provision the school/teacher and deploy Spark rules/indexes; instructions are in [Spark setup](docs/SPARK_SETUP.md). APK publication does not provision these records.
+
+Physical SIM SMS delivery remains untested. The successful cloud build runs JVM unit tests; Android 13 instrumented checks were performed locally during the implementation rather than on the Expo worker.
 
 Firebase Spark and Expo Free quotas apply; do not upgrade when a quota is exhausted. Carrier SMS consumes prepaid load. Use one phone per section while offline to avoid duplicate SMS across disconnected devices. Offline cached authorization can last up to six days; existing quarantined records require administrator review and may remain in local queue counters. Spark does not deploy the original Functions-dependent admin website or issue new NFC cards; teacher setup is through the trusted local tool, with manual roll call and scoped existing-card reads in the app.
