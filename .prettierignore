@@ -8,3 +8,5 @@ apps/teacher-mobile/android
 reports
 pnpm-lock.yaml
 apps/functions/lib
+!apps/teacher-mobile/.eas/build/
+!apps/teacher-mobile/.eas/build/*.yml

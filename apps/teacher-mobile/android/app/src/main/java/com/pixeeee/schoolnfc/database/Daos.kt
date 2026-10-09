@@ -59,6 +59,8 @@ interface AttendanceDao {
     @Query("SELECT * FROM attendance_events WHERE eventUuid = :uuid LIMIT 1") suspend fun byUuid(uuid: String): AttendanceEventEntity?
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(entity: AttendanceEventEntity): Long
     @Query("SELECT * FROM attendance_events WHERE syncStatus IN ('PENDING','RETRY') ORDER BY createdAtEpochMs LIMIT :limit") suspend fun pending(limit: Int): List<AttendanceEventEntity>
+    @Query("SELECT * FROM attendance_events WHERE syncStatus IN ('PENDING','RETRY') AND schoolId = :schoolId AND teacherId = :uid AND backend = :backend ORDER BY createdAtEpochMs LIMIT :limit")
+    suspend fun pendingForScope(limit: Int, schoolId: String, uid: String, backend: String): List<AttendanceEventEntity>
     @Query("UPDATE attendance_events SET syncStatus = :status, serverEventId = :serverEventId, conflictReason = :reason WHERE eventUuid = :uuid")
     suspend fun updateSync(uuid: String, status: String, serverEventId: String?, reason: String?)
     @Query("SELECT COUNT(*) FROM attendance_events WHERE syncStatus IN ('PENDING','RETRY')") suspend fun pendingCount(): Int
@@ -69,6 +71,10 @@ interface SmsOutboxDao {
     @Query("SELECT status FROM sms_outbox WHERE attendanceEventUuid = :eventUuid") suspend fun statusesForEvent(eventUuid: String): List<String>
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(entity: SmsOutboxEntity): Long
     @Query("SELECT * FROM sms_outbox WHERE status IN ('PENDING','READY','FAILED_RETRYABLE') AND nextAttemptAtEpochMs <= :now ORDER BY createdAtEpochMs LIMIT 1") suspend fun nextReady(now: Long): SmsOutboxEntity?
+    @Query("SELECT * FROM sms_outbox WHERE ownerUid = :uid AND status IN ('PENDING','READY','FAILED_RETRYABLE') AND nextAttemptAtEpochMs <= :now AND (guardianId = 'TEST' OR EXISTS (SELECT 1 FROM attendance_events WHERE eventUuid = attendanceEventUuid AND schoolId = :schoolId AND teacherId = :uid AND backend = :backend)) ORDER BY createdAtEpochMs LIMIT 1")
+    suspend fun nextReadyForScope(now: Long, schoolId: String, uid: String, backend: String): SmsOutboxEntity?
+    @Query("SELECT * FROM sms_outbox WHERE cloudDirty = 1 AND guardianId != 'TEST' AND ownerUid = :uid AND EXISTS (SELECT 1 FROM attendance_events WHERE eventUuid = attendanceEventUuid AND schoolId = :schoolId AND teacherId = :uid AND backend = :backend) ORDER BY updatedAtEpochMs LIMIT :limit")
+    suspend fun dirtyForScope(limit: Int, schoolId: String, uid: String, backend: String): List<SmsOutboxEntity>
     @Query("UPDATE sms_outbox SET status = 'SENDING', attemptCount = attemptCount + 1, partCount = :partCount, sentPartCount = 0, deliveredPartCount = 0, subscriptionId = :subscriptionId, updatedAtEpochMs = :now WHERE messageId = :messageId AND status IN ('PENDING','READY','FAILED_RETRYABLE')")
     suspend fun claim(messageId: String, partCount: Int, subscriptionId: Int, now: Long): Int
     @Query("SELECT * FROM sms_outbox WHERE messageId = :messageId LIMIT 1") suspend fun byMessageId(messageId: String): SmsOutboxEntity?

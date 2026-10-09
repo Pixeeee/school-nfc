@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 const api = vi.hoisted(() => ({
+  backend: "FUNCTIONS",
   getAuthState: vi.fn().mockResolvedValue({ signedIn: true }),
   listSections: vi
     .fn()
@@ -34,6 +35,7 @@ vi.mock("./native/plugin", () => ({ SchoolNfc: api }));
 vi.mock("./hooks/useNativeState", () => ({
   useNativeState: () => ({
     device: {
+      backend: api.backend,
       status: "APPROVED",
       leaseId: "lease",
       schoolId: "school",
@@ -53,6 +55,7 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
   vi.clearAllMocks();
+  api.backend = "FUNCTIONS";
 });
 async function render() {
   container = document.createElement("div");
@@ -63,6 +66,14 @@ async function render() {
   });
 }
 describe("teacher app layout", () => {
+  it("shows the supported Spark screens without billable card issuance", async () => {
+    api.backend = "SPARK";
+    await render();
+    const labels = [...container.querySelectorAll("nav button")].map((b) =>
+      b.textContent?.trim(),
+    );
+    expect(labels).toEqual(["Roll call", "NFC", "Messages", "Settings"]);
+  });
   it("opens on roll call with the section roster", async () => {
     await render();
     expect(container.querySelector("h1")?.textContent).toBe("Roll call");

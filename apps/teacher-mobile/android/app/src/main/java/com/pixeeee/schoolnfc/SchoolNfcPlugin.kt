@@ -190,6 +190,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     @PluginMethod fun listSectionStudents(call: PluginCall) = launch(call) {
         val sectionId = required(call, "sectionId")
         require(sectionId in preferences.allowedSectionIds && preferences.leaseValid()) { "Section authorization is missing or expired." }
+        require(preferences.cachedRosterValid()) { "Synchronize this account's roster first." }
         val date = LocalDate.now(ZoneId.of(preferences.schoolTimeZone)).toString()
         val students = database.students().inSection(sectionId).map { student ->
             val key = AttendancePolicy.key(requireNotNull(preferences.schoolId), student.id, date, "ARRIVAL")
@@ -272,7 +273,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         require(ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) { "SMS permission has not been granted." }
         val now = System.currentTimeMillis(); val id = UUID.randomUUID().toString()
         database.smsOutbox().insert(SmsOutboxEntity(
-            messageId = id, idempotencyKey = "TEST|$id", attendanceEventUuid = UUID.randomUUID().toString(), guardianId = "TEST",
+            messageId = id, idempotencyKey = "TEST|$id", attendanceEventUuid = UUID.randomUUID().toString(), guardianId = "TEST", ownerUid = requireNotNull(cloud.currentUser()?.uid),
             encryptedPhone = crypto.encrypt(phone), renderedMessage = message, subscriptionId = subscription, cloudDirty = false,
             createdAtEpochMs = now, updatedAtEpochMs = now,
         ))
@@ -309,7 +310,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         JSObject().put("deviceId", preferences.deviceId).put("status", preferences.deviceStatus).put("schoolId", preferences.schoolId)
             .put("leaseId", preferences.leaseId).put("leaseExpiresAt", preferences.leaseExpiresAt).put("nfcAvailable", nfc.available())
             .put("nfcEnabled", nfc.enabled()).put("smsPermission", ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED)
-            .put("selectedSubscriptionId", preferences.selectedSubscriptionId).put("syncPending", database.syncOutbox().pendingCount()).put("smsPending", database.smsOutbox().pendingCount())
+            .put("backend", if (BuildConfig.FIREBASE_SPARK) "SPARK" else "FUNCTIONS").put("selectedSubscriptionId", preferences.selectedSubscriptionId).put("syncPending", database.syncOutbox().pendingCount()).put("smsPending", database.smsOutbox().pendingCount())
     }
 
     private suspend fun queueState(): JSObject = withContext(Dispatchers.IO) {

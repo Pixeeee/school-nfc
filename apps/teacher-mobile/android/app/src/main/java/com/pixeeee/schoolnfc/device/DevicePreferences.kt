@@ -17,6 +17,11 @@ class DevicePreferences(context: Context) {
     var leaseExpiresAt: String? get() = prefs.getString("lease_expires_at", null); set(v) { prefs.edit().putString("lease_expires_at", v).apply() }
     var selectedSubscriptionId: Int? get() = if (prefs.contains("subscription_id")) prefs.getInt("subscription_id", -1) else null; set(v) { if (v == null) prefs.edit().remove("subscription_id").apply() else prefs.edit().putInt("subscription_id", v).apply() }
     var snapshotVersion: String? get() = prefs.getString("snapshot_version", null); set(v) { prefs.edit().putString("snapshot_version", v).apply() }
-    fun leaseValid(nowMs: Long = System.currentTimeMillis()): Boolean = try { leaseId != null && leaseExpiresAt?.let { java.time.Instant.parse(it).toEpochMilli() > nowMs } == true } catch (_: Exception) { false }
-    fun clearAuthorization() { prefs.edit().remove("lease_id").remove("lease_expires_at").remove("allowed_sections").putString("device_status", "UNREGISTERED").apply() }
+    val backend: String get() = if (com.pixeeee.schoolnfc.BuildConfig.FIREBASE_SPARK) "SPARK" else "FUNCTIONS"
+    var authorizationUserId: String? get() = prefs.getString("authorization_user", null); set(v) { prefs.edit().putString("authorization_user", v).apply() }
+    var authorizationBackend: String? get() = prefs.getString("authorization_backend", null); set(v) { prefs.edit().putString("authorization_backend", v).apply() }
+    var snapshotOwner: String? get() = prefs.getString("snapshot_owner", null); set(v) { prefs.edit().putString("snapshot_owner", v).apply() }
+    fun leaseValid(nowMs: Long = System.currentTimeMillis()): Boolean = try { authorizationBackend == backend && authorizationUserId != null && authorizationUserId == com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid && leaseId != null && leaseExpiresAt?.let { java.time.Instant.parse(it).toEpochMilli() > nowMs } == true } catch (_: Exception) { false }
+    fun cachedRosterValid(): Boolean = leaseValid() && snapshotOwner == "$backend|$schoolId|$authorizationUserId"
+    fun clearAuthorization() { prefs.edit().remove("lease_id").remove("lease_expires_at").remove("allowed_sections").remove("authorization_user").remove("authorization_backend").putString("device_status", "UNREGISTERED").apply() }
 }

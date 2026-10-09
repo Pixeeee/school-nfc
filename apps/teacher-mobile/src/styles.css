@@ -19,3 +19,5 @@
 button:focus-visible{outline:3px solid #78aa94;outline-offset:3px}button:disabled{cursor:default}
 @media(max-width:360px){.section-picker{grid-template-columns:1fr}.form-columns{grid-template-columns:1fr}.roster-heading .btn{font-size:11px;padding:10px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;scroll-behavior:auto!important}}
+
+.mobile-shell>nav{grid-template-columns:repeat(auto-fit,minmax(60px,1fr))}

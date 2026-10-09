@@ -24,8 +24,10 @@ class SmsQueueWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val now = System.currentTimeMillis()
         database.smsOutbox().recoverStaleSending(now, now - 5 * 60_000)
         if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) return Result.failure()
+        if (!preferences.leaseValid(now)) return Result.failure()
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return Result.failure()
         val subscriptionId = preferences.selectedSubscriptionId ?: return Result.retry()
-        val item = database.smsOutbox().nextReady(now) ?: return if (database.smsOutbox().retryCount() > 0) Result.retry() else Result.success()
+        val item = database.smsOutbox().nextReadyForScope(now, preferences.schoolId ?: return Result.failure(), uid, preferences.backend) ?: return if (database.smsOutbox().retryCount() > 0) Result.retry() else Result.success()
         return try {
             val manager = SmsManager.getSmsManagerForSubscriptionId(subscriptionId)
             val destination = crypto.decrypt(item.encryptedPhone)

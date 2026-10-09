@@ -28,7 +28,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
     @Suppress("UNCHECKED_CAST")
     private suspend fun uploadAttendance() {
-        val events = database.attendance().pending(50)
+        val events = database.attendance().pendingForScope(50, requireNotNull(preferences.schoolId), requireNotNull(cloud.currentUser()?.uid), preferences.backend)
         if (events.isEmpty()) return
         val response = cloud.ingestAttendance(events)
         val results = response["results"] as? List<Map<String, Any?>> ?: emptyList()
@@ -45,11 +45,11 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
     @Suppress("UNCHECKED_CAST")
     private suspend fun uploadSms() {
-        val dirty = database.smsOutbox().dirty(100)
+        val dirty = database.smsOutbox().dirtyForScope(100, requireNotNull(preferences.schoolId), requireNotNull(cloud.currentUser()?.uid), preferences.backend)
         if (dirty.isEmpty()) return
         val response = cloud.ingestSmsResults(dirty)
         val results = response["results"] as? List<Map<String, Any?>> ?: error("SMS sync response is invalid.")
-        val accepted = results.filter { it["result"] == "ACCEPTED" }.mapNotNull { it["messageId"]?.toString() }
+        val accepted = results.filter { it["result"] in listOf("ACCEPTED", "REJECTED") }.mapNotNull { it["messageId"]?.toString() }
         database.smsOutbox().markClean(accepted)
         if (accepted.size != dirty.size) error("Some SMS results were rejected; retained for review and retry.")
     }

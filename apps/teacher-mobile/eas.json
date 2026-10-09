@@ -1,0 +1,13 @@
+{
+  "cli": { "appVersionSource": "local" },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "node": "22.23.1",
+      "pnpm": "10.17.1",
+      "withoutCredentials": true,
+      "android": { "config": "android.yml", "buildType": "apk" }
+    }
+  }
+}

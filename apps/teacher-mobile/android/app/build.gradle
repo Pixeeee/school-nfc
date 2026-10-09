@@ -9,6 +9,7 @@ android {
     compileSdk 36
     defaultConfig { applicationId 'com.pixeeee.schoolnfc'; minSdk 26; targetSdk 36; versionCode 1; versionName '1.0.0'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
     buildFeatures { buildConfig true }
+    defaultConfig { buildConfigField "boolean", "FIREBASE_SPARK", "true" }
     compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }
     kotlinOptions { jvmTarget = '21' }
 }
@@ -19,6 +20,7 @@ dependencies {
     implementation platform('com.google.firebase:firebase-bom:34.3.0')
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-functions'
+    implementation 'com.google.firebase:firebase-firestore'
     implementation 'com.google.firebase:firebase-appcheck-playintegrity'
     implementation 'com.google.firebase:firebase-appcheck-debug'
     implementation 'androidx.room:room-runtime:2.7.2'

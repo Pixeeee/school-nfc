@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function member(school) {
+      return get(/databases/$(database)/documents/schools/$(school)/members/$(request.auth.uid)).data;
+    }
+    function active(school) {
+      return request.auth != null && member(school).status == 'ACTIVE';
+    }
+    function teacher(school) {
+      return active(school) && member(school).role in ['TEACHER', 'SCHOOL_ADMIN'];
+    }
+    function admin(school) { return active(school) && member(school).role == 'SCHOOL_ADMIN'; }
+    function device(school, id) {
+      let d = get(/databases/$(database)/documents/schools/$(school)/sparkDevices/$(id)).data;
+      return d.assignedUserId == request.auth.uid && d.status == 'APPROVED' && d.leaseExpiresAt > request.time;
+    }
+    function section(school, id) {
+      let s = get(/databases/$(database)/documents/schools/$(school)/sparkSections/$(id)).data;
+      return teacher(school) && s.active == true && (s.teacherId == request.auth.uid || admin(school));
+    }
+    function text(value, max) { return value is string && value.size() > 0 && value.size() <= max; }
+    function iso(value) { return value is string && value.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$'); }
+    function nullableIso(value) { return value == null || iso(value); }
+    match /schools/{school} {
+      allow get: if active(school);
+      match /members/{uid} { allow get: if active(school) && uid == request.auth.uid; }
+      match /academicYears/{id} { allow read: if active(school); }
+      match /gradeLevels/{id} { allow read: if active(school); }
+      match /smsTemplates/{id} { allow read: if active(school); }
+      match /students/{id} { allow read: if section(school, resource.data.sectionId); }
+      match /nfcCards/{id} { allow read: if section(school, resource.data.sectionId); }
+      match /sparkDevices/{id} {
+        allow get: if teacher(school) && (!exists(/databases/$(database)/documents/schools/$(school)/sparkDevices/$(id)) || resource.data.assignedUserId == request.auth.uid || admin(school));
+        allow list: if admin(school);
+        allow create: if teacher(school) && request.resource.data.keys().hasOnly(['assignedUserId', 'displayName', 'status', 'createdAt', 'leaseExpiresAt'])
+          && request.resource.data.assignedUserId == request.auth.uid && text(request.resource.data.displayName, 120)
+          && request.resource.data.status == 'PENDING' && request.resource.data.createdAt == request.time
+          && request.resource.data.leaseExpiresAt is timestamp && request.resource.data.leaseExpiresAt < request.time;
+        allow update: if teacher(school) && resource.data.assignedUserId == request.auth.uid && resource.data.status == 'APPROVED'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leaseExpiresAt'])
+          && request.resource.data.leaseExpiresAt > request.time && request.resource.data.leaseExpiresAt <= request.time + duration.value(7, 'd');
+      }
+      match /sparkSections/{id} {
+        allow get: if teacher(school) && (!exists(/databases/$(database)/documents/schools/$(school)/sparkSections/$(id)) || resource.data.teacherId == request.auth.uid || admin(school));
+        allow list: if teacher(school) && (resource.data.teacherId == request.auth.uid || admin(school));
+        allow create: if teacher(school) && request.resource.data.keys().hasOnly(['name', 'gradeLevelId', 'academicYearId', 'teacherId', 'active', 'deviceId', 'createdAt'])
+          && text(request.resource.data.name, 80) && request.resource.data.teacherId == request.auth.uid
+          && request.resource.data.active == true && request.resource.data.createdAt == request.time && device(school, request.resource.data.deviceId)
+          && get(/databases/$(database)/documents/schools/$(school)/academicYears/$(request.resource.data.academicYearId)).data.active == true
+          && get(/databases/$(database)/documents/schools/$(school)/gradeLevels/$(request.resource.data.gradeLevelId)).data.active == true;
+      }
+      match /sparkStudents/{id} {
+        allow get: if teacher(school) && (!exists(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(id)) || section(school, resource.data.sectionId));
+        allow list: if section(school, resource.data.sectionId);
+        allow create: if teacher(school) && section(school, request.resource.data.sectionId) && device(school, request.resource.data.deviceId)
+          && request.resource.data.keys().hasOnly(['sectionId', 'studentNumber', 'firstName', 'lastName', 'displayName', 'parentName', 'parentPhone', 'parentPhoneVerified', 'parentConsent', 'status', 'createdBy', 'deviceId', 'createdAt'])
+          && request.resource.data.studentNumber is string && request.resource.data.studentNumber.matches('^[A-Z0-9][A-Z0-9_-]{0,39}$')
+          && text(request.resource.data.firstName, 120) && text(request.resource.data.lastName, 120) && text(request.resource.data.parentName, 120)
+          && request.resource.data.displayName == request.resource.data.firstName + ' ' + request.resource.data.lastName
+          && request.resource.data.parentPhone is string && request.resource.data.parentPhone.matches('^\\+639[0-9]{9}$')
+          && request.resource.data.parentPhoneVerified == true && request.resource.data.parentConsent == true
+          && request.resource.data.status == 'ACTIVE' && request.resource.data.createdBy == request.auth.uid && request.resource.data.createdAt == request.time
+          && !exists(/databases/$(database)/documents/schools/$(school)/sparkStudentNumbers/$(request.resource.data.studentNumber))
+          && getAfter(/databases/$(database)/documents/schools/$(school)/sparkStudentNumbers/$(request.resource.data.studentNumber)).data == {'studentId': id, 'sectionId': request.resource.data.sectionId};
+      }
+      match /sparkStudentNumbers/{number} {
+        allow get: if teacher(school);
+        allow create: if teacher(school) && request.resource.data.keys().hasOnly(['studentId', 'sectionId'])
+          && section(school, request.resource.data.sectionId)
+          && !exists(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(request.resource.data.studentId))
+          && getAfter(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(request.resource.data.studentId)).data.studentNumber == number
+          && getAfter(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(request.resource.data.studentId)).data.sectionId == request.resource.data.sectionId
+          && getAfter(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(request.resource.data.studentId)).data.createdBy == request.auth.uid
+          && device(school, getAfter(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(request.resource.data.studentId)).data.deviceId);
+      }
+      match /sparkAttendance/{key} {
+        function validAttendance(d) {
+          let student = get(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(d.studentId)).data;
+          return d.keys().hasOnly(['eventUuid', 'studentId', 'sectionId', 'teacherId', 'deviceId', 'source', 'cardId', 'eventType', 'localSchoolDate', 'localTimestamp', 'timezone', 'smsExpectedCount', 'receivedAt'])
+            && text(d.eventUuid, 120) && student.status == 'ACTIVE' && student.sectionId == d.sectionId
+            && d.teacherId == request.auth.uid && section(school, d.sectionId) && device(school, d.deviceId)
+            && d.eventType in ['ARRIVAL', 'DISMISSAL', 'CUSTOM'] && d.localSchoolDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && iso(d.localTimestamp) && d.timezone == get(/databases/$(database)/documents/schools/$(school)).data.timeZone
+            && d.smsExpectedCount is int && d.smsExpectedCount >= 0 && d.smsExpectedCount <= 5 && d.receivedAt == request.time
+            && key == school + '|' + d.studentId + '|' + d.localSchoolDate + '|' + d.eventType
+            && ((d.source == 'MANUAL' && d.eventType == 'ARRIVAL' && d.cardId == null)
+              || (d.source == 'NFC' && d.cardId is string && get(/databases/$(database)/documents/schools/$(school)/nfcCards/$(d.cardId)).data.status == 'ACTIVE'
+                && get(/databases/$(database)/documents/schools/$(school)/nfcCards/$(d.cardId)).data.studentId == d.studentId));
+        }
+        allow get: if teacher(school) && (!exists(/databases/$(database)/documents/schools/$(school)/sparkAttendance/$(key)) || section(school, resource.data.sectionId));
+        allow list: if teacher(school) && (resource.data.teacherId == request.auth.uid || section(school, resource.data.sectionId));
+        allow create: if teacher(school) && validAttendance(request.resource.data);
+      }
+      match /sparkSms/{id} {
+        function validSms(d) {
+          let a = get(/databases/$(database)/documents/schools/$(school)/sparkAttendance/$(d.attendanceKey)).data;
+          let student = get(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(d.studentId)).data;
+          return d.keys().hasOnly(['attendanceKey', 'attendanceEventId', 'studentId', 'sectionId', 'guardianId', 'teacherId', 'deviceId', 'status', 'attemptCount', 'sentAt', 'deliveredAt', 'lastErrorCode', 'updatedAt'])
+            && section(school, d.sectionId) && device(school, d.deviceId) && d.teacherId == request.auth.uid
+            && a.eventUuid == d.attendanceEventId && a.studentId == d.studentId && a.sectionId == d.sectionId && a.teacherId == d.teacherId && a.deviceId == d.deviceId
+            && student.parentPhoneVerified == true && student.parentConsent == true && d.guardianId == d.studentId + '_parent'
+            && d.status in ['QUEUED', 'SENDING', 'SENT', 'DELIVERED', 'FAILED_RETRYABLE', 'FAILED_FINAL']
+            && d.attemptCount is int && d.attemptCount >= 0 && d.attemptCount <= 8
+            && nullableIso(d.sentAt) && nullableIso(d.deliveredAt) && (d.lastErrorCode == null || text(d.lastErrorCode, 120)) && d.updatedAt == request.time;
+        }
+        allow get: if teacher(school) && (!exists(/databases/$(database)/documents/schools/$(school)/sparkSms/$(id)) || section(school, resource.data.sectionId));
+        allow list: if section(school, resource.data.sectionId);
+        allow create: if teacher(school) && validSms(request.resource.data);
+        allow update: if teacher(school) && validSms(request.resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'attemptCount', 'sentAt', 'deliveredAt', 'lastErrorCode', 'updatedAt'])
+          && request.resource.data.attemptCount >= resource.data.attemptCount;
+      }
+    }
+  }
+}

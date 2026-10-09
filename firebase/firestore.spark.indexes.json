@@ -1,0 +1,15 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "sparkStudents",
+      "fieldPath": "parentPhone",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "sparkStudents",
+      "fieldPath": "parentName",
+      "indexes": []
+    }
+  ]
+}

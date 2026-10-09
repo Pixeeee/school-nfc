@@ -19,12 +19,18 @@ class SnapshotSynchronizer(
     private val crypto: CryptoManager,
 ) {
     suspend fun refreshAll() {
+        val owner = "${preferences.backend}|${preferences.schoolId}|${requireNotNull(cloud.currentUser()?.uid)}"
+        if (preferences.snapshotOwner != owner) database.withTransaction {
+            database.sections().clear(); database.students().clear(); database.cards().clear()
+            database.guardianRoutes().clear(); database.smsTemplates().clear()
+        }
         refreshConfig()
         refreshKind("SECTIONS") { items -> database.sections().clear(); database.sections().upsert(items.filter { it["active"] == true }.map { SectionEntity(it["id"].toString(), it["name"].toString()) }) }
         refreshKind("STUDENTS") { items -> database.students().clear(); database.students().upsert(items.mapNotNull(::student)) }
         refreshKind("CARDS") { items -> database.cards().clear(); database.cards().upsert(items.mapNotNull(::card)) }
         refreshKind("GUARDIANS") { items -> database.guardianRoutes().clear(); database.guardianRoutes().upsert(items.mapNotNull(::guardianRoute)) }
         refreshKind("TEMPLATES") { items -> database.smsTemplates().clear(); database.smsTemplates().upsert(items.mapNotNull(::template)) }
+        preferences.snapshotOwner = owner
     }
 
     @Suppress("UNCHECKED_CAST")

@@ -97,17 +97,19 @@ export default function App() {
         )}
       </main>
       <nav aria-label="Main navigation">
-        {tabs.map(([id, label, Icon]) => (
-          <button
-            key={id}
-            className={tab === id ? "active" : ""}
-            aria-current={tab === id ? "page" : undefined}
-            onClick={() => void changeTab(id)}
-          >
-            <Icon />
-            <span>{label}</span>
-          </button>
-        ))}
+        {tabs
+          .filter(([id]) => device.backend !== "SPARK" || id !== "cards")
+          .map(([id, label, Icon]) => (
+            <button
+              key={id}
+              className={tab === id ? "active" : ""}
+              aria-current={tab === id ? "page" : undefined}
+              onClick={() => void changeTab(id)}
+            >
+              <Icon />
+              <span>{label}</span>
+            </button>
+          ))}
       </nav>
     </div>
   );

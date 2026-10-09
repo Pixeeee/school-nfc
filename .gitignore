@@ -59,3 +59,7 @@ apps/teacher-mobile/android/capacitor-cordova-android-plugins/
 apps/teacher-mobile/android/capacitor.settings.gradle
 apps/teacher-mobile/android/app/capacitor.build.gradle
 apps/teacher-mobile/android/app/src/main/res/xml/config.xml
+
+# Expo custom native build configuration is source, not generated output
+!apps/teacher-mobile/.eas/build/
+!apps/teacher-mobile/.eas/build/*.yml

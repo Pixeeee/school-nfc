@@ -35,6 +35,7 @@ class AttendanceRepository(
 
     suspend fun startSession(schoolId: String, mode: String, sectionId: String?, customLabel: String?): ActiveScannerSession {
         require(preferences.deviceStatus == "APPROVED" && preferences.leaseValid()) { "Device authorization is missing or expired." }
+        require(preferences.cachedRosterValid()) { "Synchronize this account's roster before taking attendance." }
         require(schoolId == preferences.schoolId) { "This phone belongs to another school." }
         require(mode in setOf("ARRIVAL", "DISMISSAL", "CUSTOM")) { "Unsupported scanner mode." }
         val uid = requireNotNull(FirebaseAuth.getInstance().currentUser?.uid) { "Sign in is required." }
@@ -56,6 +57,7 @@ class AttendanceRepository(
         val now = System.currentTimeMillis()
         val timestamp = Instant.ofEpochMilli(now).toString()
         val session = activeSession ?: return rejected(timestamp, "No scanner session is active.")
+        if (!preferences.cachedRosterValid()) return rejected(timestamp, "Synchronize this account's roster before scanning cards.")
         if (!preferences.leaseValid(now)) return rejected(timestamp, "Device authorization lease has expired.")
         val payload = try { CardPayloadCodec.parse(rawPayload) } catch (error: Exception) { return rejected(timestamp, error.message ?: "Unsupported NFC card.") }
         if (preferences.schoolPublicCode != null && payload.schoolPublicCode != preferences.schoolPublicCode) return rejected(timestamp, "This card belongs to another school.")
@@ -68,6 +70,7 @@ class AttendanceRepository(
         if (card.status != "ACTIVE") return rejected(timestamp, "Card is ${card.status.lowercase().replace('_', ' ')}.")
         if (card.tagUidHash != null && tagUidHash != null && card.tagUidHash != tagUidHash) return rejected(timestamp, "Possible copied card detected. Attendance was not recorded.")
         val student = database.students().byId(card.studentId) ?: return rejected(timestamp, "Student record is not available on this device.")
+        if (student.sectionId !in preferences.allowedSectionIds) return rejected(timestamp, "Student is outside this phone's authorized sections.")
         if (student.status != "ACTIVE") return rejected(timestamp, "Student is not active.")
         if (session.sectionId != null && student.sectionId != session.sectionId) return rejected(timestamp, "Student is outside this scanner session's section.")
 
@@ -75,6 +78,7 @@ class AttendanceRepository(
     }
 
     suspend fun markPresent(schoolId: String, studentId: String, sectionId: String): ScanOutcome = recordMutex.withLock {
+        require(preferences.cachedRosterValid()) { "Synchronize this account's roster before taking attendance." }
         require(schoolId == preferences.schoolId) { "This phone belongs to another school." }
         require(preferences.deviceStatus == "APPROVED" && preferences.leaseValid()) { "Renew this phone's authorization before taking attendance." }
         val uid = requireNotNull(FirebaseAuth.getInstance().currentUser?.uid) { "Sign in is required." }
@@ -106,7 +110,7 @@ class AttendanceRepository(
         val eligibleRoutes = if (template?.enabled == true) routes else emptyList()
         val status = if (session.mode == "DISMISSAL") "DISMISSED" else "PRESENT"
         val event = AttendanceEventEntity(
-            eventUuid = eventUuid, idempotencyKey = key, schoolId = session.schoolId, studentId = student.id, cardId = cardId, source = source,
+            eventUuid = eventUuid, idempotencyKey = key, schoolId = session.schoolId, studentId = student.id, cardId = cardId, source = source, backend = preferences.backend,
             eventType = session.mode, status = status, localSchoolDate = localDate, localTimestamp = timestamp,
             elapsedRealtimeMs = SystemClock.elapsedRealtime(), timezone = zone.id, clockTrust = "UNKNOWN",
             deviceId = preferences.deviceId, teacherId = FirebaseAuth.getInstance().currentUser!!.uid,
@@ -128,7 +132,7 @@ class AttendanceRepository(
                     ))
                     database.smsOutbox().insert(SmsOutboxEntity(
                         messageId = messageId, idempotencyKey = "$eventUuid|${route.guardianId}|${template.id}", attendanceEventUuid = eventUuid,
-                        guardianId = route.guardianId, encryptedPhone = route.encryptedPhone, renderedMessage = message,
+                        guardianId = route.guardianId, ownerUid = requireNotNull(FirebaseAuth.getInstance().currentUser?.uid), encryptedPhone = route.encryptedPhone, renderedMessage = message,
                         subscriptionId = preferences.selectedSubscriptionId, createdAtEpochMs = now, updatedAtEpochMs = now,
                     ))
                 }

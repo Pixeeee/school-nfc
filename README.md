@@ -1,5 +1,7 @@
 # School NFC Attendance
 
+The Android app now defaults to **Firebase Spark with no billing**. Follow [Spark setup](docs/SPARK_SETUP.md) for school provisioning, security rules and Expo APK distribution. The original Functions backend and admin web remain in the repository as a separate deployment; they are not deployed for Spark.
+
 A production-oriented, offline-first school attendance platform. Authorized staff write secure random identifiers to NFC cards with the Android app. Students tap a teacher phone; attendance is committed locally immediately; parent SMS messages and Firebase synchronization continue in independent durable queues.
 
 ## Applications

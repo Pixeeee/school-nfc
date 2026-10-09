@@ -15,8 +15,11 @@ class CloudGateway(private val preferences: DevicePreferences) {
     private val auth = FirebaseAuth.getInstance()
     private val functions = FirebaseFunctions.getInstance("asia-southeast1")
 
+    init { if (preferences.leaseId != null && (preferences.authorizationBackend != preferences.backend || preferences.authorizationUserId != auth.currentUser?.uid)) preferences.clearAuthorization() }
+
     suspend fun signIn(email: String, password: String): Map<String, Any?> {
         val result = auth.signInWithEmailAndPassword(email.trim().lowercase(), password).await()
+        preferences.clearAuthorization()
         return mapOf("signedIn" to true, "uid" to result.user?.uid, "email" to result.user?.email)
     }
 
@@ -25,6 +28,7 @@ class CloudGateway(private val preferences: DevicePreferences) {
 
     @Suppress("UNCHECKED_CAST")
     suspend fun call(name: String, data: Map<String, Any?>): Map<String, Any?> {
+        if (BuildConfig.FIREBASE_SPARK) return SparkGateway(preferences).call(name, data)
         val result = functions.getHttpsCallable(name).call(data).await().data
         return result as? Map<String, Any?> ?: error("Cloud Function $name returned an invalid response.")
     }
@@ -49,6 +53,8 @@ class CloudGateway(private val preferences: DevicePreferences) {
         val result = call("renewDeviceLease", mapOf("schoolId" to schoolId, "deviceId" to preferences.deviceId))
         preferences.schoolId = schoolId
         preferences.deviceStatus = "APPROVED"
+        preferences.authorizationUserId = requireNotNull(auth.currentUser?.uid)
+        preferences.authorizationBackend = preferences.backend
         preferences.allowedSectionIds = (result["sectionIds"] as? List<*>)?.filterIsInstance<String>()?.toSet() ?: emptySet()
         preferences.leaseId = result["leaseId"]?.toString()
         preferences.leaseExpiresAt = result["expiresAt"]?.toString()
@@ -79,6 +85,7 @@ class CloudGateway(private val preferences: DevicePreferences) {
 
     suspend fun ingestAttendance(events: List<AttendanceEventEntity>): Map<String, Any?> {
         val schoolId = requireNotNull(preferences.schoolId)
+        require(events.all { it.schoolId == schoolId && it.teacherId == auth.currentUser?.uid && it.deviceId == preferences.deviceId && it.backend == preferences.backend }) { "Attendance belongs to another account or backend." }
         return call("ingestAttendanceBatch", mapOf(
             "schoolId" to schoolId, "deviceId" to preferences.deviceId, "leaseId" to requireNotNull(preferences.leaseId),
             "batchId" to UUID.randomUUID().toString(),

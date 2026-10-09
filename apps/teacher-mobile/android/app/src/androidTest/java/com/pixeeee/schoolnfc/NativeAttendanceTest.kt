@@ -64,10 +64,12 @@ class NativeAttendanceTest {
         }
         old.version = 1
         old.close()
-        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(AppDatabase.MIGRATION_1_2).build()
+        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build()
         try {
             assertEquals("NFC", upgraded.attendance().byUuid("preserved")!!.source)
             assertNotNull(upgraded.smsOutbox().byMessageId("preserved"))
+            assertEquals("FUNCTIONS", upgraded.attendance().byUuid("preserved")!!.backend)
+            assertEquals("", upgraded.smsOutbox().byMessageId("preserved")!!.ownerUid)
             assertTrue(upgraded.sections().all().isEmpty())
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
@@ -77,10 +79,13 @@ class NativeAttendanceTest {
         val auth = FirebaseAuth.getInstance()
         auth.useEmulator("10.0.2.2", 9099)
         FirebaseFunctions.getInstance("asia-southeast1").useEmulator("10.0.2.2", 5001)
+        runCatching { com.google.firebase.firestore.FirebaseFirestore.getInstance().useEmulator("10.0.2.2", 8080) }
         auth.signInAnonymously().await()
         val prefs = DevicePreferences(context)
+        prefs.authorizationUserId = auth.currentUser!!.uid; prefs.authorizationBackend = prefs.backend
         prefs.schoolId = "test_school"; prefs.deviceStatus = "APPROVED"; prefs.leaseId = "test_lease"
         prefs.leaseExpiresAt = Instant.now().plusSeconds(3600).toString(); prefs.allowedSectionIds = setOf("section_a")
+        prefs.snapshotOwner = "${prefs.backend}|${prefs.schoolId}|${prefs.authorizationUserId}"
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {
             database.students().upsert(listOf(StudentEntity("student_a", "001", "Juan Santos", "section_a", "ACTIVE")))
@@ -92,6 +97,19 @@ class NativeAttendanceTest {
             assertEquals(1, database.attendance().pendingCount())
             assertEquals(1, database.smsOutbox().pendingCount())
             assertEquals("MANUAL", database.attendance().pending(10).single().source)
+            val event = database.attendance().pending(10).single()
+            val uid = requireNotNull(auth.currentUser?.uid)
+            assertTrue(database.attendance().pendingForScope(10, "test_school", "other_user", prefs.backend).isEmpty())
+            assertNull(database.smsOutbox().nextReadyForScope(System.currentTimeMillis(), "test_school", "other_user", prefs.backend))
+            assertEquals(uid, database.smsOutbox().dirtyForScope(10, "test_school", uid, prefs.backend).single().ownerUid)
+            database.attendance().insert(event.copy(localId = 0, eventUuid = "legacy_event", idempotencyKey = "legacy_key", backend = "FUNCTIONS"))
+            assertEquals(1, database.attendance().pendingForScope(10, "test_school", uid, "SPARK").size)
+            prefs.snapshotOwner = "FUNCTIONS|test_school|$uid"
+            assertFalse(prefs.cachedRosterValid())
+            prefs.snapshotOwner = "${prefs.backend}|test_school|$uid"
+            prefs.authorizationUserId = "other_user"
+            assertFalse(prefs.leaseValid())
+            prefs.authorizationUserId = uid
             val now = System.currentTimeMillis()
             database.smsOutbox().insert(SmsOutboxEntity(messageId = "test_message", idempotencyKey = "TEST|test_message", attendanceEventUuid = "not_an_event", guardianId = "TEST", encryptedPhone = "not_used", renderedMessage = "Test", subscriptionId = null, cloudDirty = false, createdAtEpochMs = now, updatedAtEpochMs = now))
             database.smsOutbox().markPartSent("test_message", Instant.now().toString(), now)

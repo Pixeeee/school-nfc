@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "School Attendance",
+    "slug": "attendance-check",
+    "version": "1.0.0",
+    "android": {
+      "package": "com.pixeeee.schoolnfc"
+    },
+    "owner": "pixeee"
+  }
+}

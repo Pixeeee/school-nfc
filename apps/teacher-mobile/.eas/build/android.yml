@@ -1,0 +1,39 @@
+build:
+  name: School attendance Spark APK
+  steps:
+    - eas/checkout
+    - eas/install_node_modules
+    - run:
+        name: Select Java 21
+        command: |
+          if [ -n "${JAVA_HOME_21_X64:-}" ]; then
+            set-env JAVA_HOME "$JAVA_HOME_21_X64"
+            set-env PATH "$JAVA_HOME_21_X64/bin:$PATH"
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y openjdk-21-jdk-headless
+            set-env JAVA_HOME /usr/lib/jvm/java-21-openjdk-amd64
+            set-env PATH "/usr/lib/jvm/java-21-openjdk-amd64/bin:$PATH"
+          fi
+    - run:
+        name: Configure Firebase and require signing
+        command: |
+          test -f "$GOOGLE_SERVICES_JSON"
+          test -f "$SCHOOL_NFC_KEYSTORE_PATH"
+          test -n "$SCHOOL_NFC_KEYSTORE_PASSWORD"
+          test -n "$SCHOOL_NFC_KEY_ALIAS"
+          test -n "$SCHOOL_NFC_KEY_PASSWORD"
+          cp "$GOOGLE_SERVICES_JSON" android/app/google-services.json
+    - run:
+        name: Build web assets and sync native host
+        command: |
+          pnpm --filter @school-nfc/teacher-mobile... build
+          pnpm exec cap sync android
+    - run:
+        name: Test and build standalone Android APK
+        working_directory: android
+        command: ./gradlew --no-daemon testReleaseUnitTest assembleRelease
+    - eas/upload_artifact:
+        inputs:
+          type: application-archive
+          path: android/app/build/outputs/apk/release/*.apk

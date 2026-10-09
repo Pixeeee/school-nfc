@@ -6,6 +6,7 @@ export interface AuthState {
   email?: string;
 }
 export interface DeviceState {
+  backend?: "SPARK" | "FUNCTIONS";
   deviceId: string;
   status: "UNREGISTERED" | "PENDING" | "APPROVED" | "SUSPENDED" | "REVOKED";
   schoolId?: string;
