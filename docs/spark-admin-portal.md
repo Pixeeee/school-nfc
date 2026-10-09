@@ -8,7 +8,7 @@ Enable Firebase Email/Password Authentication and create Firestore on Spark. Dep
 
 Use `scripts/provision-portal-admin.mjs` once with a private Admin SDK credential supplied through `GOOGLE_APPLICATION_CREDENTIALS`. Its arguments are project ID, school ID, username, email, and display name. Supply a JSON object containing the password on stdin. It creates a disabled account, commits the school membership and username mapping, then enables the account. It refuses to replace an existing account's password. A failed bootstrap leaves the account disabled for inspection and recovery.
 
-Administrators create teachers and approve Android devices. Teachers own their sections and student records. Students have no login accounts. Each attendance change records an audit entry, and retries are idempotent. Disabled memberships and revoked tokens cannot access the API.
+Administrators create teachers with a username, email, and initial password, then give teachers their username and password. Username mappings are unique and created atomically with memberships. Administrators also approve Android devices. Teachers own their sections and student records. Students have no login accounts. Each attendance change records an audit entry, and retries are idempotent. Disabled memberships and revoked tokens cannot access the API.
 
 The web dashboard records Present and Absent. SIM SMS delivery runs on the installed Android teacher app with its approved device and configured SIM; browsers cannot send SMS using a phone's prepaid load. Web roll-call decisions remain separate from immutable Android arrival events so they do not accidentally trigger duplicate SMS.
 

@@ -17,6 +17,11 @@ const schemas = {
   teacherCreate: z
     .object({
       action: z.literal("teacherCreate"),
+      username: z
+        .string()
+        .trim()
+        .toLowerCase()
+        .regex(/^[a-z0-9_]{3,40}$/),
       email,
       password: z.string().min(8).max(128),
       name: text(120),
@@ -286,23 +291,34 @@ export function createPortalHandler({
             ),
           });
         case "teacherCreate": {
+          const handle = db.doc("loginNames/" + input.username);
+          if ((await handle.get()).exists)
+            throw new RequestError(409, "Username is already in use.");
           const created = await auth.createUser({
             email: input.email,
             password: input.password,
             displayName: input.name,
             disabled: true,
           });
+          let handleClaimed = false;
           try {
-            await db.doc(`${base}/members/${created.uid}`).create({
-              status: "ACTIVE",
-              role: "TEACHER",
-              email: input.email,
-              displayName: input.name,
-              effectivePermissions: [],
-              sectionIds: [],
-              createdAt: FieldValue.serverTimestamp(),
-              createdBy: uid,
+            await db.runTransaction(async (tx) => {
+              if ((await tx.get(handle)).exists)
+                throw new RequestError(409, "Username is already in use.");
+              tx.create(handle, { uid: created.uid, email: input.email });
+              tx.create(db.doc(`${base}/members/${created.uid}`), {
+                status: "ACTIVE",
+                role: "TEACHER",
+                username: input.username,
+                email: input.email,
+                displayName: input.name,
+                effectivePermissions: [],
+                sectionIds: [],
+                createdAt: FieldValue.serverTimestamp(),
+                createdBy: uid,
+              });
             });
+            handleClaimed = true;
             await auth.updateUser(created.uid, { disabled: false });
           } catch (error) {
             // Roll back only this newly created account so the teacher can retry.
@@ -312,10 +328,15 @@ export function createPortalHandler({
             await Promise.allSettled([
               auth.deleteUser(created.uid),
               db.doc(`${base}/members/${created.uid}`).delete(),
+              ...(handleClaimed ? [handle.delete()] : []),
             ]);
             throw error;
           }
-          return res.json({ uid: created.uid, email: input.email });
+          return res.json({
+            uid: created.uid,
+            email: input.email,
+            username: input.username,
+          });
         }
         case "sectionList":
           return res.json({

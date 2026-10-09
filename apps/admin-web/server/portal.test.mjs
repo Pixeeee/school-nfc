@@ -76,6 +76,7 @@ describe("portal trust boundaries", () => {
         await call(s.handler, {
           action: "teacherCreate",
           email: "teacher@example.com",
+          username: "testteacher",
           password: "test-password",
           name: "Teacher",
         })
@@ -105,6 +106,7 @@ describe("portal trust boundaries", () => {
           schoolId: "other",
           role: "SCHOOL_ADMIN",
           email: "teacher@example.com",
+          username: "testteacher",
           password: "test-password",
           name: "Teacher",
         })

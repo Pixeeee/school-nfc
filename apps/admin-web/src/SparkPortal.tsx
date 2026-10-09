@@ -68,6 +68,7 @@ interface Choice {
 }
 interface Teacher {
   id: string;
+  username?: string;
   displayName: string;
   email: string;
   status: string;
@@ -388,7 +389,7 @@ export function SparkPortal() {
             <div>
               <span className="eyebrow">SCHOOL WORKSPACE</span>
               <h2>Welcome back</h2>
-              <p>Sign in with your username or teacher email.</p>
+              <p>Sign in with your administrator or teacher username.</p>
             </div>
             {error && <Banner>{error}</Banner>}
             <Field label="Username or email">
@@ -618,6 +619,20 @@ export function SparkPortal() {
                   <Field label="Full name">
                     <input name="name" required maxLength={120} />
                   </Field>
+                  <Field label="Username">
+                    <input
+                      name="username"
+                      required
+                      minLength={3}
+                      maxLength={40}
+                      pattern="[A-Za-z0-9_]{3,40}"
+                      autoComplete="off"
+                    />
+                    <small className="muted">
+                      Letters, numbers, and underscores. Give this username and
+                      initial password to the teacher.
+                    </small>
+                  </Field>
                   <Field label="Email">
                     <input
                       name="email"
@@ -652,6 +667,7 @@ export function SparkPortal() {
                     <thead>
                       <tr>
                         <th>Name</th>
+                        <th>Username</th>
                         <th>Email</th>
                         <th>Status</th>
                       </tr>
@@ -660,6 +676,7 @@ export function SparkPortal() {
                       {teachers.map((t) => (
                         <tr key={t.id}>
                           <td data-label="Name">{t.displayName || t.email}</td>
+                          <td data-label="Username">{t.username || "—"}</td>
                           <td data-label="Email">{t.email}</td>
                           <td data-label="Status">
                             <StatusBadge value={t.status} />

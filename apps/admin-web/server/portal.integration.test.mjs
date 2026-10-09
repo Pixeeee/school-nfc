@@ -85,14 +85,34 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
   });
   it("creates a teacher account and membership without storing a password", async () => {
     const email = randomUUID() + "@example.test";
+    const username = "teacher_" + randomUUID().slice(0, 8);
     const r = await call(
       "teacherCreate",
-      { email, password: "test-only-password", name: "Test teacher" },
+      { email, username, password: "test-only-password", name: "Test teacher" },
       "adminA",
     );
     expect(r.code).toBe(200);
     const member = (await db.doc(base + "/members/" + r.body.uid).get()).data();
     expect(member.role).toBe("TEACHER");
+    expect(member.username).toBe(username);
+    expect((await db.doc("loginNames/" + username).get()).data().uid).toBe(
+      r.body.uid,
+    );
+    const collision = await call(
+      "teacherCreate",
+      {
+        email: randomUUID() + "@example.test",
+        username,
+        password: "test-only-password",
+        name: "Another teacher",
+      },
+      "adminA",
+    );
+    expect(collision.code).toBe(409);
+    expect((await db.doc("loginNames/" + username).get()).data().uid).toBe(
+      r.body.uid,
+    );
+    await db.doc("loginNames/" + username).delete();
     expect(member.password).toBeUndefined();
     expect((await auth.getUser(r.body.uid)).disabled).toBe(false);
     await auth.deleteUser(r.body.uid);
@@ -295,6 +315,7 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
         body: {
           action: "teacherCreate",
           email: address,
+          username: "rollback_" + address.slice(0, 8),
           password: "test-only-password",
           name: "Test teacher",
         },
@@ -305,6 +326,9 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
     await expect(auth.getUserByEmail(address)).rejects.toMatchObject({
       code: "auth/user-not-found",
     });
+    expect(
+      (await db.doc("loginNames/rollback_" + address.slice(0, 8)).get()).exists,
+    ).toBe(false);
     expect((await db.doc(base + "/members/" + createdId).get()).exists).toBe(
       false,
     );
