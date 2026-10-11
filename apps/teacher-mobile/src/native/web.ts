@@ -61,11 +61,11 @@ export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
       email: this.signedIn ? "demo@example.test" : undefined,
     };
   }
-  async signIn(o: { email: string; password: string }): Promise<AuthState> {
+  async signIn(o: { username: string; password: string }): Promise<AuthState> {
     if (o.password.length < 8)
       throw new Error("Password must contain at least 8 characters.");
     this.signedIn = true;
-    return { signedIn: true, email: o.email };
+    return { signedIn: true, email: o.username };
   }
   async signOut() {
     this.signedIn = false;

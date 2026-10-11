@@ -67,7 +67,11 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
         .doc(base + "/sparkSections/" + teacher)
         .set({ name: teacher, teacherId: teacher, active: true });
     const boundaryAuth = {
-      verifyIdToken: async (uid) => ({ uid, email: uid + "@example.test" }),
+      verifyIdToken: async (uid) => ({
+        uid,
+        email: uid + "@example.test",
+        portalClient: "ANDROID",
+      }),
       createUser: (input) => auth.createUser(input),
       updateUser: (uid, input) => auth.updateUser(uid, input),
       deleteUser: (uid) => auth.deleteUser(uid),
@@ -116,6 +120,64 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
     expect(member.password).toBeUndefined();
     expect((await auth.getUser(r.body.uid)).disabled).toBe(false);
     await auth.deleteUser(r.body.uid);
+  });
+  it("issues teacher credentials once and allows Android login while denying the web dashboard", async () => {
+    const username = "mobile_" + randomUUID().slice(0, 8);
+    const r = await call(
+      "teacherCreate",
+      { username, name: "Mobile teacher" },
+      "adminA",
+    );
+    expect(r.code).toBe(200);
+    expect(r.body.password).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    expect(
+      (await db.doc(base + "/members/" + r.body.uid).get()).data().password,
+    ).toBeUndefined();
+    expect(
+      (await db.doc("loginNames/" + username).get()).data().password,
+    ).toBeUndefined();
+    const createCustomToken = vi.fn(async () => "custom-token");
+    const h = createPortalHandler({
+      db,
+      schoolId,
+      apiKey: "emulator-key",
+      auth: {
+        verifyIdToken: (...args) => auth.verifyIdToken(...args),
+        createCustomToken,
+      },
+      fetchImpl: (_url, options) =>
+        fetch(
+          "http://" +
+            process.env.FIREBASE_AUTH_EMULATOR_HOST +
+            "/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=emulator-key",
+          options,
+        ),
+    });
+    const login = async (client) => {
+      const res = response();
+      await h(
+        {
+          method: "POST",
+          headers: {},
+          body: {
+            action: "login",
+            identifier: username,
+            password: r.body.password,
+            client,
+          },
+        },
+        res,
+      );
+      return res;
+    };
+    expect((await login("WEB")).code).toBe(401);
+    expect(createCustomToken).not.toHaveBeenCalled();
+    expect((await login("ANDROID")).code).toBe(200);
+    expect(createCustomToken).toHaveBeenCalledWith(r.body.uid, {
+      portalClient: "ANDROID",
+    });
+    await auth.deleteUser(r.body.uid);
+    await db.doc("loginNames/" + username).delete();
   });
   it("rejects creating sections with inactive academic choices", async () => {
     const r = await call("sectionCreate", {

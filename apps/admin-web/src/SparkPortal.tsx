@@ -132,6 +132,11 @@ export function SparkPortal() {
   const [years, setYears] = useState<Choice[]>([]);
   const [grades, setGrades] = useState<Choice[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [teacherFilter, setTeacherFilter] = useState("");
+  const [issued, setIssued] = useState<{
+    username: string;
+    password: string;
+  } | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [selected, setSelected] = useState("");
   const [date, setDate] = useState("");
@@ -165,6 +170,8 @@ export function SparkPortal() {
         setSelected("");
         setSections([]);
         setTeachers([]);
+        setTeacherFilter("");
+        setIssued(null);
         setDevices([]);
         setAttendance([]);
         setError("");
@@ -184,6 +191,10 @@ export function SparkPortal() {
       profileRequest.current === requestId;
     const result = await request<Overview>("overview");
     if (!current()) return;
+    if (result.profile.role !== "SCHOOL_ADMIN")
+      throw new Error(
+        "This dashboard is for the school administrator only. Teachers sign in using the Android app.",
+      );
     setOverview(result);
     setDate((current) => current || result.date);
     const setup = await request<{
@@ -287,14 +298,31 @@ export function SparkPortal() {
     event.preventDefault();
     const values = formValues(event);
     const element = event.currentTarget;
+    const epoch = authEpoch.current;
+    if (!values.email) delete values.email;
+    if (!values.password) delete values.password;
+    setIssued(null);
     await perform(async () => {
-      await request("teacherCreate", values);
+      const credentials = await request<{ username: string; password: string }>(
+        "teacherCreate",
+        values,
+      );
+      if (authEpoch.current !== epoch) return;
+      setIssued(credentials);
       element.reset();
       await load();
       setNotice(
-        "Teacher account created. Share the email and password privately with the teacher.",
+        "Teacher account created. Share the username and password privately with the teacher. They sign in to the Android app.",
       );
     });
+  }
+  useEffect(() => {
+    if (tab !== "teachers") setIssued(null);
+  }, [tab]);
+  function filterTeacher(id: string) {
+    setTeacherFilter(id);
+    setStudents([]);
+    setSelected(sections.find((s) => !id || s.teacherId === id)?.id || "");
   }
   async function createSection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -373,8 +401,8 @@ export function SparkPortal() {
             every school day.
           </h1>
           <p>
-            Manage teachers, organize sections, and record student attendance in
-            one school workspace.
+            Create teacher accounts and review every teacher’s class data in one
+            school workspace.
           </p>
           <div className="trust-row">
             <ShieldCheck />
@@ -389,7 +417,7 @@ export function SparkPortal() {
             <div>
               <span className="eyebrow">SCHOOL WORKSPACE</span>
               <h2>Welcome back</h2>
-              <p>Sign in with your administrator or teacher username.</p>
+              <p>Sign in with your administrator username.</p>
             </div>
             {error && <Banner>{error}</Banner>}
             <Field label="Username or email">
@@ -633,13 +661,8 @@ export function SparkPortal() {
                       initial password to the teacher.
                     </small>
                   </Field>
-                  <Field label="Email">
-                    <input
-                      name="email"
-                      type="email"
-                      autoComplete="off"
-                      required
-                    />
+                  <Field label="Email (optional)">
+                    <input name="email" type="email" autoComplete="off" />
                   </Field>
                   <Field label="Initial password">
                     <input
@@ -648,7 +671,7 @@ export function SparkPortal() {
                       autoComplete="new-password"
                       minLength={8}
                       maxLength={128}
-                      required
+                      placeholder="Leave blank to generate a secure password"
                     />
                   </Field>
                   <div className="form-actions">
@@ -658,6 +681,24 @@ export function SparkPortal() {
                   </div>
                 </form>
               </Card>
+              {issued && (
+                <Card>
+                  <h2>Teacher login details</h2>
+                  <p>
+                    Give these credentials to the teacher for the Android app.
+                    The password is shown only now.
+                  </p>
+                  <p>
+                    Username: <strong>{issued.username}</strong>
+                  </p>
+                  <p>
+                    Initial password: <code>{issued.password}</code>
+                  </p>
+                  <Button variant="secondary" onClick={() => setIssued(null)}>
+                    Hide credentials
+                  </Button>
+                </Card>
+              )}
               <Card className="portal-list">
                 <h2>
                   Teachers <span className="muted">({teachers.length})</span>
@@ -670,6 +711,7 @@ export function SparkPortal() {
                         <th>Username</th>
                         <th>Email</th>
                         <th>Status</th>
+                        <th>Class data</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -677,9 +719,27 @@ export function SparkPortal() {
                         <tr key={t.id}>
                           <td data-label="Name">{t.displayName || t.email}</td>
                           <td data-label="Username">{t.username || "—"}</td>
-                          <td data-label="Email">{t.email}</td>
+                          <td data-label="Email">
+                            {t.email?.endsWith(".invalid") ? "—" : t.email}
+                          </td>
                           <td data-label="Status">
                             <StatusBadge value={t.status} />
+                          </td>
+                          <td data-label="Class data">
+                            <Button
+                              variant="secondary"
+                              onClick={() => {
+                                filterTeacher(t.id);
+                                setTab("sections");
+                              }}
+                            >
+                              View classes (
+                              {
+                                sections.filter((s) => s.teacherId === t.id)
+                                  .length
+                              }
+                              )
+                            </Button>
                           </td>
                         </tr>
                       ))}
@@ -701,13 +761,15 @@ export function SparkPortal() {
                 title={admin ? "Sections & students" : "My sections"}
                 description="Keep each class organized, with parent contacts and daily attendance."
                 action={
-                  <Button
-                    disabled={busy || !!form}
-                    onClick={() => setForm("section")}
-                  >
-                    <Plus size={17} />
-                    Create section
-                  </Button>
+                  !admin && (
+                    <Button
+                      disabled={busy || !!form}
+                      onClick={() => setForm("section")}
+                    >
+                      <Plus size={17} />
+                      Create section
+                    </Button>
+                  )
                 }
               />
               {form === "section" && (
@@ -756,6 +818,25 @@ export function SparkPortal() {
                 </Card>
               )}
               <div className="portal-roster-controls">
+                <Field label="Teacher">
+                  <select
+                    value={teacherFilter}
+                    onChange={(e) => filterTeacher(e.target.value)}
+                  >
+                    <option value="">All teachers</option>
+                    {teachers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.displayName} · {t.username || t.email}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Button
+                  variant="secondary"
+                  onClick={() => setTab("attendance")}
+                >
+                  View attendance
+                </Button>
                 <Field label="Section">
                   <select
                     value={selected}
@@ -766,14 +847,18 @@ export function SparkPortal() {
                     disabled={busy}
                   >
                     <option value="">Choose a section</option>
-                    {sections.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                        {admin
-                          ? ` · ${teachers.find((t) => t.id === s.teacherId)?.displayName || (s.teacherId === user.uid ? "Administrator" : "Teacher")}`
-                          : ""}
-                      </option>
-                    ))}
+                    {sections
+                      .filter(
+                        (s) => !teacherFilter || s.teacherId === teacherFilter,
+                      )
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                          {admin
+                            ? ` · ${teachers.find((t) => t.id === s.teacherId)?.displayName || (s.teacherId === user.uid ? "Administrator" : "Teacher")}`
+                            : ""}
+                        </option>
+                      ))}
                   </select>
                 </Field>
                 <Field label="Attendance date">
@@ -785,7 +870,7 @@ export function SparkPortal() {
                     onChange={(e) => setDate(e.target.value)}
                   />
                 </Field>
-                {selected && owner && (
+                {selected && owner && !admin && (
                   <Button
                     variant="secondary"
                     disabled={busy || !!form}
@@ -977,6 +1062,19 @@ export function SparkPortal() {
                 title="Attendance records"
                 description="Review explicit Present and Absent records from the school workspace."
               />
+              <Field label="Teacher">
+                <select
+                  value={teacherFilter}
+                  onChange={(e) => filterTeacher(e.target.value)}
+                >
+                  <option value="">All teachers</option>
+                  {teachers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.displayName} · {t.username || t.email}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               <Field label="School date">
                 <input
                   type="date"
@@ -997,25 +1095,35 @@ export function SparkPortal() {
                       </tr>
                     </thead>
                     <tbody>
-                      {attendance.map((a) => (
-                        <tr key={a.id}>
-                          <td data-label="Student">
-                            {a.studentName || a.studentId}
-                          </td>
-                          <td data-label="Section">
-                            {sections.find((s) => s.id === a.sectionId)?.name ||
-                              a.sectionId}
-                          </td>
-                          <td data-label="Status">
-                            <StatusBadge value={a.status} />
-                          </td>
-                          <td data-label="Source">
-                            {a.source === "WEB"
-                              ? "Web dashboard"
-                              : "Android app"}
-                          </td>
-                        </tr>
-                      ))}
+                      {attendance
+                        .filter(
+                          (a) =>
+                            !teacherFilter ||
+                            sections.some(
+                              (s) =>
+                                s.id === a.sectionId &&
+                                s.teacherId === teacherFilter,
+                            ),
+                        )
+                        .map((a) => (
+                          <tr key={a.id}>
+                            <td data-label="Student">
+                              {a.studentName || a.studentId}
+                            </td>
+                            <td data-label="Section">
+                              {sections.find((s) => s.id === a.sectionId)
+                                ?.name || a.sectionId}
+                            </td>
+                            <td data-label="Status">
+                              <StatusBadge value={a.status} />
+                            </td>
+                            <td data-label="Source">
+                              {a.source === "WEB"
+                                ? "Web dashboard"
+                                : "Android app"}
+                            </td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>

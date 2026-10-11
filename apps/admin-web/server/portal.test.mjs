@@ -23,7 +23,12 @@ const member = (role = "TEACHER", status = "ACTIVE") => ({
   data: () => ({ role, status }),
 });
 function setup(membership = member()) {
-  const auth = { verifyIdToken: vi.fn(async () => ({ uid: "teacherA" })) };
+  const auth = {
+    verifyIdToken: vi.fn(async () => ({
+      uid: "teacherA",
+      portalClient: "ANDROID",
+    })),
+  };
   const db = { doc: vi.fn(() => ({ get: vi.fn(async () => membership) })) };
   return {
     auth,
@@ -67,6 +72,11 @@ describe("portal trust boundaries", () => {
   });
   it("rejects inactive membership", async () => {
     const s = setup(member("TEACHER", "SUSPENDED"));
+    expect((await call(s.handler, { action: "overview" })).code).toBe(403);
+  });
+  it("rejects teacher web sessions even when the school membership is active", async () => {
+    const s = setup();
+    s.auth.verifyIdToken.mockResolvedValue({ uid: "teacherA" });
     expect((await call(s.handler, { action: "overview" })).code).toBe(403);
   });
   it("rejects teacher account creation by a teacher", async () => {

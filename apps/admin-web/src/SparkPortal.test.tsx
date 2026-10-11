@@ -103,7 +103,9 @@ describe("portal obsolete response protection", () => {
       previous.resolve(response(profile("admin", "SCHOOL_ADMIN"))),
     );
     await flush();
-    expect(container.textContent).toContain("Teacher dashboard");
+    expect(container.textContent).toContain(
+      "This dashboard is for the school administrator only",
+    );
     expect(container.textContent).not.toContain("Administrator dashboard");
     expect(container.textContent).not.toContain("Manage teachers");
   });
@@ -114,7 +116,7 @@ describe("portal obsolete response protection", () => {
       vi.fn(async (_url, options) => {
         const input = JSON.parse(options.body);
         if (input.action === "overview")
-          return response(profile("teacher", "TEACHER"));
+          return response(profile("teacher", "SCHOOL_ADMIN"));
         if (input.action === "sectionList") return response(setup);
         if (input.action === "studentList")
           return input.sectionId === "A"
@@ -131,16 +133,18 @@ describe("portal obsolete response protection", () => {
                   },
                 ],
               });
-        return response({});
+        return response({ teachers: [], devices: [] });
       }),
     );
     await act(async () => root.render(<SparkPortal />));
     await flush();
     const button = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent === "My sections",
+      (b) => b.textContent === "Sections & students",
     )!;
     await act(async () => button.click());
-    const select = container.querySelector("select")!;
+    const select = Array.from(container.querySelectorAll("select")).find((s) =>
+      Array.from(s.options).some((o) => o.value === "B"),
+    )!;
     await act(async () => {
       select.value = "B";
       select.dispatchEvent(new Event("change", { bubbles: true }));
@@ -165,5 +169,49 @@ describe("portal obsolete response protection", () => {
     await flush();
     expect(container.textContent).toContain("Student B");
     expect(container.textContent).not.toContain("Private parent A");
+  });
+  it("shows newly issued credentials once and clears them when leaving Teachers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, options) => {
+        const input = JSON.parse(options.body);
+        if (input.action === "overview")
+          return response(profile("admin", "SCHOOL_ADMIN"));
+        if (input.action === "sectionList") return response(setup);
+        if (input.action === "teacherCreate")
+          return response({
+            username: "teacher_new",
+            password: "Generated-Test-Password",
+          });
+        return response({ teachers: [], devices: [], students: [] });
+      }),
+    );
+    await act(async () => root.render(<SparkPortal />));
+    await flush();
+    const teachers = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Teachers",
+    )!;
+    await act(async () => teachers.click());
+    container.querySelector<HTMLInputElement>('input[name="name"]')!.value =
+      "Teacher New";
+    container.querySelector<HTMLInputElement>('input[name="username"]')!.value =
+      "teacher_new";
+    await act(async () =>
+      container
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    await flush();
+    expect(container.textContent).toContain("Generated-Test-Password");
+    const overview = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Overview",
+    )!;
+    await act(async () => overview.click());
+    await flush();
+    await act(async () => teachers.click());
+    await flush();
+    expect(container.textContent).not.toContain("Generated-Test-Password");
   });
 });

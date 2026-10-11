@@ -17,8 +17,14 @@ class CloudGateway(private val preferences: DevicePreferences) {
 
     init { if (preferences.leaseId != null && (preferences.authorizationBackend != preferences.backend || preferences.authorizationUserId != auth.currentUser?.uid)) preferences.clearAuthorization() }
 
-    suspend fun signIn(email: String, password: String): Map<String, Any?> {
-        val result = auth.signInWithEmailAndPassword(email.trim().lowercase(), password).await()
+    suspend fun signIn(identifier: String, password: String): Map<String, Any?> {
+        val result = if (BuildConfig.FIREBASE_SPARK) {
+            val login = PortalLoginClient.signIn(identifier, password)
+            val session = auth.signInWithCustomToken(login.first).await()
+            preferences.clearAuthorization()
+            preferences.schoolId = login.second
+            session
+        } else auth.signInWithEmailAndPassword(identifier.trim().lowercase(), password).await()
         preferences.clearAuthorization()
         return mapOf("signedIn" to true, "uid" to result.user?.uid, "email" to result.user?.email)
     }

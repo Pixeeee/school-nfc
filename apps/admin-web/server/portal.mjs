@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { normalizePhilippineMobile } from "@school-nfc/contracts";
@@ -22,8 +23,8 @@ const schemas = {
         .trim()
         .toLowerCase()
         .regex(/^[a-z0-9_]{3,40}$/),
-      email,
-      password: z.string().min(8).max(128),
+      email: email.optional(),
+      password: z.string().min(8).max(128).optional(),
       name: text(120),
     })
     .strict(),
@@ -133,12 +134,13 @@ export function createPortalHandler({
       .object({
         action: z.literal("login"),
         identifier: text(254),
+        client: z.enum(["WEB", "ANDROID"]).default("WEB"),
         password: z.string().min(1).max(128),
       })
       .strict()
       .safeParse(body);
     if (!parsed.success) throw generic();
-    const { identifier, password } = parsed.data;
+    const { identifier, password, client } = parsed.data;
     let address = identifier.trim().toLowerCase();
     if (!address.includes("@")) {
       if (!/^[a-z0-9_]{3,40}$/.test(address)) throw generic();
@@ -165,10 +167,16 @@ export function createPortalHandler({
     if (
       !membership.exists ||
       membership.data().status !== "ACTIVE" ||
-      !["SCHOOL_ADMIN", "TEACHER"].includes(membership.data().role)
+      membership.data().role !==
+        (client === "ANDROID" ? "TEACHER" : "SCHOOL_ADMIN")
     )
       throw generic();
-    return { customToken: await auth.createCustomToken(token.uid) };
+    return {
+      customToken: await auth.createCustomToken(token.uid, {
+        portalClient: client,
+      }),
+      schoolId,
+    };
   }
   return async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
@@ -205,6 +213,11 @@ export function createPortalHandler({
       )
         throw new RequestError(403, "Your school account is not active.");
       const isAdmin = member.data().role === "SCHOOL_ADMIN";
+      if (!isAdmin && token.portalClient !== "ANDROID")
+        throw new RequestError(
+          403,
+          "This dashboard is for the school administrator only.",
+        );
       if (adminActions.has(body.action) && !isAdmin)
         throw new RequestError(403, "Administrator access required.");
       const parsed = schemas[body.action]?.safeParse(body);
@@ -291,12 +304,17 @@ export function createPortalHandler({
             ),
           });
         case "teacherCreate": {
+          const address =
+            input.email ||
+            `${input.username}@teachers.${projectId || "schoolattendance"}.invalid`;
+          const password =
+            input.password || randomBytes(18).toString("base64url");
           const handle = db.doc("loginNames/" + input.username);
           if ((await handle.get()).exists)
             throw new RequestError(409, "Username is already in use.");
           const created = await auth.createUser({
-            email: input.email,
-            password: input.password,
+            email: address,
+            password,
             displayName: input.name,
             disabled: true,
           });
@@ -305,12 +323,12 @@ export function createPortalHandler({
             await db.runTransaction(async (tx) => {
               if ((await tx.get(handle)).exists)
                 throw new RequestError(409, "Username is already in use.");
-              tx.create(handle, { uid: created.uid, email: input.email });
+              tx.create(handle, { uid: created.uid, email: address });
               tx.create(db.doc(`${base}/members/${created.uid}`), {
                 status: "ACTIVE",
                 role: "TEACHER",
                 username: input.username,
-                email: input.email,
+                email: address,
                 displayName: input.name,
                 effectivePermissions: [],
                 sectionIds: [],
@@ -334,8 +352,9 @@ export function createPortalHandler({
           }
           return res.json({
             uid: created.uid,
-            email: input.email,
+            email: address,
             username: input.username,
+            password,
           });
         }
         case "sectionList":

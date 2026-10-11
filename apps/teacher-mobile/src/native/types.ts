@@ -89,7 +89,7 @@ export interface SchoolNfcPlugin {
     studentId: string;
   }): Promise<ScanResult>;
   getAuthState(): Promise<AuthState>;
-  signIn(options: { email: string; password: string }): Promise<AuthState>;
+  signIn(options: { username: string; password: string }): Promise<AuthState>;
   signOut(): Promise<void>;
   getDeviceState(): Promise<DeviceState>;
   registerDevice(options: {

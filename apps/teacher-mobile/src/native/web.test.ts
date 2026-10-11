@@ -4,7 +4,7 @@ describe("web fallback", () => {
   it("rejects weak sign-in", async () => {
     const p = new SchoolNfcWeb();
     await expect(
-      p.signIn({ email: "a@b.com", password: "short" }),
+      p.signIn({ username: "teacher_a", password: "short" }),
     ).rejects.toThrow();
   });
   it("does not pretend browser NFC is production scanner", async () => {

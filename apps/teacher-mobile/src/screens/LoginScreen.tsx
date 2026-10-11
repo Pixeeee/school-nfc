@@ -3,15 +3,18 @@ import { School, ShieldCheck } from "lucide-react";
 import { SchoolNfc } from "../native/plugin";
 import { Banner, Button, Field } from "../components/Ui";
 export function LoginScreen({ onLogin }: { onLogin: () => void }) {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      setError("Enter a valid email address.");
+    if (
+      !/^[a-z0-9_]{3,40}$/i.test(username.trim()) &&
+      !/^\S+@\S+\.\S+$/.test(username.trim())
+    ) {
+      setError("Enter the username provided by your administrator.");
       return;
     }
     if (password.length < 8) {
@@ -20,7 +23,10 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
     }
     try {
       setBusy(true);
-      await SchoolNfc.signIn({ email: email.trim().toLowerCase(), password });
+      await SchoolNfc.signIn({
+        username: username.trim().toLowerCase(),
+        password,
+      });
       onLogin();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sign-in failed.");
@@ -40,17 +46,18 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
         <span className="eyebrow">TEACHER DEVICE</span>
         <h1>Your classroom, ready for roll call.</h1>
         <p>
-          Sign in with your authorized school account. This phone must also be
-          approved before taking attendance or sending parent texts.
+          Sign in with the teacher username and password provided by your
+          administrator. This phone must also be approved before taking
+          attendance or sending parent texts.
         </p>
         {error && <Banner>{error}</Banner>}
         <form onSubmit={submit}>
-          <Field label="Email">
+          <Field label="Username">
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
             />
           </Field>
           <Field label="Password">

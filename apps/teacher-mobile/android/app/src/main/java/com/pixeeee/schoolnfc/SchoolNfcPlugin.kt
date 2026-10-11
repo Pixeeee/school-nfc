@@ -92,11 +92,11 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     }
 
     @PluginMethod fun signIn(call: PluginCall) = launch(call) {
-        val email = call.getString("email")?.trim()?.lowercase().orEmpty()
+        val username = (call.getString("username") ?: call.getString("email"))?.trim()?.lowercase().orEmpty()
         val password = call.getString("password").orEmpty()
-        require(android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) { "Enter a valid email address." }
+        require(Regex("^[a-z0-9_]{3,40}$").matches(username) || android.util.Patterns.EMAIL_ADDRESS.matcher(username).matches()) { "Enter the teacher username provided by your administrator." }
         require(password.length >= 8) { "Password must contain at least 8 characters." }
-        val result = cloud.signIn(email, password)
+        val result = cloud.signIn(username, password)
         resolve(call, result)
     }
 
