@@ -1049,8 +1049,12 @@ export function SparkPortal() {
               ) : (
                 <Card>
                   <Empty
-                    title="Start with a section"
-                    description="Create a section, then add students and their parent contacts."
+                    title={admin ? "No sections yet" : "Start with a section"}
+                    description={
+                      admin
+                        ? "This teacher creates sections and student attendance records in the Android app. Their class data will appear here."
+                        : "Create a section, then add students and their parent contacts."
+                    }
                   />
                 </Card>
               )}
