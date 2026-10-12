@@ -58,6 +58,9 @@ interface AttendanceDao {
     @Query("SELECT * FROM attendance_events WHERE schoolId = :schoolId AND studentId = :studentId AND localSchoolDate = :date AND teacherId = :uid AND backend = :backend AND eventType IN ('ARRIVAL','ABSENT') ORDER BY createdAtEpochMs DESC, localId DESC LIMIT 1")
     suspend fun latestRollCall(schoolId: String, studentId: String, date: String, uid: String, backend: String): AttendanceEventEntity?
 
+    @Query("SELECT * FROM attendance_events WHERE schoolId = :schoolId AND studentId = :studentId AND localSchoolDate = :date AND subjectId = :subjectId AND backend = 'SPARK' AND syncStatus != 'CONFLICT' ORDER BY createdAtEpochMs DESC, localId DESC LIMIT 1")
+    suspend fun latestSubject(schoolId: String, studentId: String, date: String, subjectId: String): AttendanceEventEntity?
+
     @Query("SELECT * FROM attendance_events WHERE idempotencyKey = :key LIMIT 1") suspend fun byIdempotencyKey(key: String): AttendanceEventEntity?
     @Query("SELECT * FROM attendance_events WHERE eventUuid = :uuid LIMIT 1") suspend fun byUuid(uuid: String): AttendanceEventEntity?
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(entity: AttendanceEventEntity): Long

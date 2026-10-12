@@ -23,3 +23,13 @@ Validation: portal trust-boundary tests, React stale-response tests, and real Fi
 Spark authorization is based on active school membership and ownership of the teacher’s sections. Device IDs remain attendance source metadata. The app refreshes its account-bound offline session automatically; it does not create or approve a phone registration document.
 
 Each student stores a verified parent mobile number. Android Present and Absent changes atomically save the attendance event and queue a text to that saved number. Repeating the current status does not queue a second message; changing the status again records and texts the new decision. Manual events retain their own immutable event IDs, and the administrator views the latest native decision per student. SMS dispatch runs through WorkManager while the app is open or in the background, after Android SMS permission and SIM selection. Sending uses prepaid load; carrier delivery still requires a real-phone check.
+
+## Adviser and subject attendance (Android 1.3)
+
+In **Sections**, the administrator assigns the section adviser and adds subjects with a teacher and start/end times. One student/parent roster is shared across those assignments. The section creator starts as its adviser; changing the adviser preserves existing students and attendance. Students have no sign-in accounts.
+
+The assigned subject teacher chooses **Present on time**, **Present late**, or **Absent**, and can edit the subject schedule. Each subject has independent daily attendance. A schedule suggests lateness; the teacher confirms the actual tag. SMS includes the student, subject, schedule, school date and recorded time, sent through the selected prepaid SIM.
+
+The adviser creates students and parent contacts, views all subject attendance, and confirms **Out** after reviewing the parent recipient count. The first Out requires connectivity to reserve a single section/day claim across phones. The same phone can retry after interruption without queueing another text; its complete local batch is saved before SMS dispatch starts. Dismissal refers to the section being dismissed, including parents whose student was absent.
+
+Existing queues and rosters are retained by the additive Room upgrade. Regular attendance remains available with a valid cached account session; assignment changes require synchronization on offline phones. Release builds shrink unused code/resources and omit web source maps; the release smoke runner checks the installed signed APK's native feedback and JavaScript bridge.

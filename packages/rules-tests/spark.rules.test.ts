@@ -423,3 +423,238 @@ describe("Spark client trust boundaries", () => {
     await assertFails(setDoc(ref(db, "sparkSections/new"), section()));
   });
 });
+
+describe("subjects and adviser dismissal", () => {
+  async function assigned() {
+    await seed();
+    await createStudent();
+    await env.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await updateDoc(ref(db, "sparkSections/sectionA"), {
+        adviserId: "teacherB",
+        subjectTeacherIds: ["teacherA"],
+      });
+      await setDoc(ref(db, "sparkSubjects/math"), {
+        sectionId: "sectionA",
+        teacherId: "teacherA",
+        name: "Math",
+        startTime: "08:00",
+        endTime: "09:00",
+        active: true,
+      });
+      await setDoc(ref(db, "sparkSubjects/science"), {
+        sectionId: "sectionA",
+        teacherId: "teacherB",
+        name: "Science",
+        startTime: "09:00",
+        endTime: "10:00",
+        active: true,
+      });
+    });
+  }
+  it("shares roster while restricting subject writes and assignment changes", async () => {
+    await assigned();
+    const db = dbFor();
+    await assertSucceeds(getDoc(ref(db, "sparkStudents/studentA")));
+    await assertFails(
+      updateDoc(ref(db, "sparkSections/sectionA"), {
+        subjectTeacherIds: ["stranger"],
+      }),
+    );
+    await assertSucceeds(
+      updateDoc(ref(db, "sparkSubjects/math"), {
+        name: "Mathematics",
+        startTime: "08:30",
+        endTime: "09:30",
+      }),
+    );
+    await assertFails(
+      updateDoc(ref(db, "sparkSubjects/math"), { endTime: "07:00" }),
+    );
+    await assertFails(
+      updateDoc(ref(db, "sparkSubjects/science"), { name: "Stolen" }),
+    );
+    await assertSucceeds(
+      setDoc(
+        ref(db, "sparkAttendance/schoolA|studentA|2026-10-09|math|ROLLCALL|m1"),
+        attendance({
+          eventUuid: "m1",
+          subjectId: "math",
+          attendanceTag: "ON_TIME",
+        }),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        ref(
+          db,
+          "sparkAttendance/schoolA|studentA|2026-10-09|science|ROLLCALL|s1",
+        ),
+        attendance({
+          eventUuid: "s1",
+          subjectId: "science",
+          attendanceTag: "ABSENT",
+          eventType: "ABSENT",
+        }),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        ref(db, "sparkAttendance/schoolA|studentA|2026-10-09|math|ROLLCALL|m2"),
+        attendance({
+          eventUuid: "m2",
+          subjectId: "math",
+          attendanceTag: "PRESENT",
+        }),
+      ),
+    );
+    await assertFails(
+      setDoc(ref(db, `sparkAttendance/${attendanceKey}`), attendance()),
+    );
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(dbFor("teacherB"), `${base}/sparkAttendance`),
+          where("sectionId", "==", "sectionA"),
+          where("localSchoolDate", "==", "2026-10-09"),
+        ),
+      ),
+    );
+  });
+  it("reassigned creator loses parent and roster access without a subject assignment", async () => {
+    await assigned();
+    await env.withSecurityRulesDisabled(async (context) =>
+      updateDoc(ref(context.firestore(), "sparkSections/sectionA"), {
+        subjectTeacherIds: [],
+      }),
+    );
+    await assertFails(getDoc(ref(dbFor(), "sparkStudents/studentA")));
+    await assertFails(
+      setDoc(ref(dbFor(), `sparkAttendance/${attendanceKey}`), attendance()),
+    );
+    await assertFails(createStudent(dbFor(), { studentNumber: "NEW" }));
+    await assertSucceeds(
+      getDoc(ref(dbFor("teacherB"), "sparkStudents/studentA")),
+    );
+  });
+  it("protects a single immutable section/day Out claim and requires it for dismissal", async () => {
+    await assigned();
+    const path = "sparkDismissals/sectionA_2026-10-09";
+    const claim = {
+      sectionId: "sectionA",
+      localSchoolDate: "2026-10-09",
+      teacherId: "teacherB",
+      deviceId: "teacherB",
+      studentIds: ["studentA"],
+      localTimestamp: "2026-10-09T10:00:00Z",
+      createdAt: serverTimestamp(),
+    };
+    await assertFails(
+      setDoc(ref(dbFor(), path), {
+        ...claim,
+        teacherId: "teacherA",
+        deviceId: "teacherA",
+      }),
+    );
+    await assertSucceeds(setDoc(ref(dbFor("teacherB"), path), claim));
+    await assertSucceeds(getDoc(ref(dbFor("teacherB"), path)));
+    await assertFails(setDoc(ref(dbFor("teacherB"), path), claim));
+    await assertSucceeds(
+      setDoc(
+        ref(
+          dbFor("teacherB"),
+          "sparkAttendance/schoolA|studentA|2026-10-09|DISMISSAL",
+        ),
+        attendance({
+          eventUuid: "out",
+          localTimestamp: claim.localTimestamp,
+          teacherId: "teacherB",
+          deviceId: "teacherB",
+          eventType: "DISMISSAL",
+        }),
+      ),
+    );
+    const dismissal = attendance({
+      eventUuid: "out",
+      teacherId: "teacherB",
+      deviceId: "teacherB",
+      eventType: "DISMISSAL",
+      localTimestamp: claim.localTimestamp,
+    });
+    await assertFails(
+      setDoc(
+        ref(
+          dbFor("teacherB"),
+          "sparkAttendance/schoolA|studentA|2026-10-09|DISMISSAL",
+        ),
+        dismissal,
+      ),
+    );
+    await assertFails(
+      setDoc(
+        ref(
+          dbFor("teacherB"),
+          "sparkAttendance/schoolA|studentA|2026-10-09|ROLLCALL|bypass",
+        ),
+        { ...dismissal, eventUuid: "bypass" },
+      ),
+    );
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        ref(context.firestore(), "sparkStudents/studentOutsideClaim"),
+        student({ studentNumber: "OUTSIDE" }),
+      );
+    });
+    await assertFails(
+      setDoc(
+        ref(
+          dbFor("teacherB"),
+          "sparkAttendance/schoolA|studentOutsideClaim|2026-10-09|DISMISSAL",
+        ),
+        {
+          ...dismissal,
+          studentId: "studentOutsideClaim",
+          eventUuid: "outside",
+        },
+      ),
+    );
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        ref(context.firestore(), "sparkStudents/studentWrongTime"),
+        student({ studentNumber: "WRONGTIME" }),
+      );
+      await updateDoc(ref(context.firestore(), path), {
+        studentIds: ["studentA", "studentWrongTime"],
+      });
+    });
+    await assertFails(
+      setDoc(
+        ref(
+          dbFor("teacherB"),
+          "sparkAttendance/schoolA|studentWrongTime|2026-10-09|DISMISSAL",
+        ),
+        {
+          ...dismissal,
+          studentId: "studentWrongTime",
+          eventUuid: "wrongtime",
+          localTimestamp: "2026-10-09T10:05:00Z",
+        },
+      ),
+    );
+    await assertFails(
+      setDoc(
+        ref(
+          dbFor("teacherB"),
+          "sparkAttendance/schoolA|studentA|2026-10-10|DISMISSAL",
+        ),
+        attendance({
+          eventUuid: "out2",
+          teacherId: "teacherB",
+          deviceId: "teacherB",
+          eventType: "DISMISSAL",
+          localSchoolDate: "2026-10-10",
+        }),
+      ),
+    );
+  });
+});

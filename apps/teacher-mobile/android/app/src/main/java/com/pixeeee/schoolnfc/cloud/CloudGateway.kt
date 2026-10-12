@@ -98,7 +98,7 @@ class CloudGateway(private val preferences: DevicePreferences) {
             "batchId" to UUID.randomUUID().toString(),
             "events" to events.map { e -> mapOf(
                 "eventUuid" to e.eventUuid, "idempotencyKey" to e.idempotencyKey, "studentId" to e.studentId, "cardId" to e.cardId.takeIf { e.source == "NFC" }, "source" to e.source,
-                "eventType" to e.eventType, "localSchoolDate" to e.localSchoolDate, "localTimestamp" to e.localTimestamp,
+                "subjectId" to e.subjectId.takeIf { e.backend == "SPARK" && it.isNotEmpty() }, "attendanceTag" to e.attendanceTag.takeIf { e.backend == "SPARK" && it.isNotEmpty() }, "eventType" to e.eventType, "localSchoolDate" to e.localSchoolDate, "localTimestamp" to e.localTimestamp,
                 "timezone" to e.timezone, "clockTrust" to e.clockTrust, "scannerSessionId" to e.scannerSessionId,
                 "smsExpectedCount" to e.smsExpectedCount,
             ).filterValues { it != null } },

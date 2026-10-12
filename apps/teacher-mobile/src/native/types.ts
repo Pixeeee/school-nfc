@@ -75,6 +75,35 @@ export interface CardWriteState {
   message?: string;
 }
 export interface SchoolNfcPlugin {
+  updateSubject(options: {
+    subjectId: string;
+    name: string;
+    startTime: string;
+    endTime: string;
+  }): Promise<{ subjectId: string }>;
+  markSubject(options: {
+    sectionId: string;
+    studentId: string;
+    subjectId: string;
+    tag: "ON_TIME" | "LATE" | "ABSENT";
+  }): Promise<ScanResult>;
+  subjectAttendance(options: {
+    sectionId: string;
+    date: string;
+  }): Promise<{
+    attendance: Array<{
+      studentId: string;
+      subjectId?: string;
+      attendanceTag?: string;
+      eventType: string;
+      localTimestamp: string;
+    }>;
+  }>;
+  dismissalCount(options: { sectionId: string }): Promise<{ count: number }>;
+  dismissSection(options: {
+    sectionId: string;
+    expectedCount: number;
+  }): Promise<{ queued: number }>;
   listSections(): Promise<{ sections: SectionSummary[] }>;
   getTeacherSetup(): Promise<TeacherSetup>;
   createSection(options: CreateSectionRequest): Promise<{ sectionId: string }>;
@@ -83,6 +112,7 @@ export interface SchoolNfcPlugin {
   ): Promise<{ studentId: string; guardianId: string }>;
   listSectionStudents(options: {
     sectionId: string;
+    subjectId?: string;
   }): Promise<{ students: RosterStudent[]; localSchoolDate: string }>;
   markAbsent(options: {
     sectionId: string;
@@ -147,8 +177,19 @@ export interface SchoolNfcPlugin {
 export interface SectionSummary {
   id: string;
   name: string;
+  adviserId?: string;
+  isAdviser?: boolean;
+  subjects?: SubjectSummary[];
   gradeLevelId?: string;
   academicYearId?: string;
+}
+export interface SubjectSummary {
+  isAssigned?: boolean;
+  id: string;
+  name: string;
+  teacherId: string;
+  startTime: string;
+  endTime: string;
 }
 export interface TeacherSetup {
   sections: SectionSummary[];
@@ -157,7 +198,7 @@ export interface TeacherSetup {
 }
 export interface RosterStudent extends StudentSummary {
   present: boolean;
-  attendanceStatus?: "PRESENT" | "ABSENT" | "UNMARKED";
+  attendanceStatus?: "PRESENT" | "ON_TIME" | "LATE" | "ABSENT" | "UNMARKED";
   smsStatus: "NONE" | "QUEUED" | "SENT" | "DELIVERED" | "FAILED";
   syncStatus?: string;
 }

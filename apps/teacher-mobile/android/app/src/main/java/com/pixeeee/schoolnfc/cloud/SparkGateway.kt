@@ -27,6 +27,10 @@ class SparkGateway(private val preferences: DevicePreferences) {
             "registerDevice" -> register(schoolId, text(data, "displayName"))
             "renewDeviceLease" -> renew(schoolId)
             "getTeacherSetup" -> setup(schoolId)
+            "updateSubject" -> updateSubject(schoolId, data)
+            "subjectAttendance" -> subjectAttendance(schoolId, data)
+            "claimDismissal" -> claimDismissal(schoolId, data)
+            "dismissalPreview" -> dismissalPreview(schoolId, data)
             "createTeacherSection" -> createSection(schoolId, data)
             "createTeacherStudent" -> createStudent(schoolId, data)
             "getDeviceSnapshot" -> snapshot(schoolId, data)
@@ -43,9 +47,76 @@ class SparkGateway(private val preferences: DevicePreferences) {
 
     private suspend fun authorized(schoolId: String) { membership(schoolId) }
 
-    private suspend fun sections(schoolId: String): List<Map<String, Any?>> = school(schoolId).collection("sparkSections")
-        .whereEqualTo("teacherId", uid).get(Source.SERVER).await().documents
-        .filter { it.getBoolean("active") == true }.map { it.data.orEmpty() + ("id" to it.id) }
+    private suspend fun sections(schoolId: String): List<Map<String, Any?>> {
+        val root = school(schoolId)
+        val collection = root.collection("sparkSections")
+        val docs = listOf(collection.whereEqualTo("teacherId", uid), collection.whereEqualTo("adviserId", uid), collection.whereArrayContains("subjectTeacherIds", uid))
+            .flatMap { it.get(Source.SERVER).await().documents }.distinctBy { it.id }
+        return docs.filter { it.getBoolean("active") == true && ((it.getString("adviserId") ?: it.getString("teacherId")) == uid || (it.get("subjectTeacherIds") as? List<*>)?.contains(uid) == true) }.map { doc ->
+            val adviser = doc.getString("adviserId") ?: doc.getString("teacherId")
+            var query = root.collection("sparkSubjects").whereEqualTo("sectionId", doc.id)
+            if (adviser != uid) query = query.whereEqualTo("teacherId", uid)
+            doc.data.orEmpty() + mapOf("id" to doc.id, "adviserId" to adviser, "subjects" to query.get(Source.SERVER).await().documents.filter { it.getBoolean("active") == true }.map { it.data.orEmpty() + mapOf("id" to it.id, "isAssigned" to (it.getString("teacherId") == uid)) })
+        }
+    }
+
+    private suspend fun updateSubject(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
+        membership(schoolId)
+        val ref = school(schoolId).collection("sparkSubjects").document(text(data, "subjectId"))
+        val name = text(data, "name"); val start = text(data, "startTime"); val end = text(data, "endTime")
+        require(name.length <= 80 && Regex("^([01]\\d|2[0-3]):[0-5]\\d$").matches(start) && Regex("^([01]\\d|2[0-3]):[0-5]\\d$").matches(end) && end > start) { "Use a name and start/end times in order." }
+        db.runTransaction { tx ->
+            require(tx.get(ref).getString("teacherId") == uid) { "Only the assigned subject teacher can edit its schedule." }
+            tx.update(ref, mapOf("name" to name, "startTime" to start, "endTime" to end))
+        }.await()
+        return mapOf("subjectId" to ref.id)
+    }
+
+    private suspend fun subjectAttendance(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
+        membership(schoolId)
+        val sectionId = text(data, "sectionId"); val root = school(schoolId)
+        val section = root.collection("sparkSections").document(sectionId).get(Source.SERVER).await()
+        val adviser = section.getString("adviserId") ?: section.getString("teacherId")
+        var query = root.collection("sparkAttendance").whereEqualTo("sectionId", sectionId).whereEqualTo("localSchoolDate", text(data, "date"))
+        if (adviser != uid) query = query.whereEqualTo("teacherId", uid)
+        return mapOf("attendance" to query.get(Source.SERVER).await().documents.map { it.data.orEmpty() + ("id" to it.id) })
+    }
+
+    private suspend fun dismissalRecipients(schoolId: String, sectionId: String): List<String> {
+        val root = school(schoolId)
+        val section = root.collection("sparkSections").document(sectionId).get(Source.SERVER).await()
+        require(section.getBoolean("active") == true && (section.getString("adviserId") ?: section.getString("teacherId")) == uid) { "Only the adviser can dismiss this section." }
+        return root.collection("sparkStudents").whereEqualTo("sectionId", sectionId).whereEqualTo("status", "ACTIVE").get(Source.SERVER).await().documents
+            .filter { it.getBoolean("parentConsent") == true && it.getBoolean("parentPhoneVerified") == true && it.getString("parentPhone")?.matches(Regex("^\\+639\\d{9}$")) == true }.map { it.id }
+    }
+    private suspend fun dismissalPreview(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
+        membership(schoolId)
+        return mapOf("count" to dismissalRecipients(schoolId, text(data, "sectionId")).size)
+    }
+
+    private suspend fun claimDismissal(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
+        membership(schoolId)
+        val sectionId = text(data, "sectionId"); val date = text(data, "date"); val root = school(schoolId)
+        val zone = ZoneId.of(root.get(Source.SERVER).await().getString("timeZone") ?: "Asia/Manila")
+        require(java.time.LocalDate.now(zone).toString() == date) { "The school date changed. Refresh before Out." }
+        val ref = root.collection("sparkDismissals").document("${sectionId}_$date")
+        val recipients = dismissalRecipients(schoolId, sectionId)
+        val expected = (data["expectedCount"] as? Number)?.toInt() ?: error("Confirm the recipient count first.")
+        val claim = db.runTransaction { tx ->
+            val old = tx.get(ref)
+            val section = tx.get(root.collection("sparkSections").document(sectionId))
+            require(section.getBoolean("active") == true && (section.getString("adviserId") ?: section.getString("teacherId")) == uid) { "Only the adviser can dismiss the section." }
+            if (old.exists()) {
+                require(old.getString("teacherId") == uid && old.getString("deviceId") == preferences.deviceId) { "Out was already recorded for this section today on another phone." }
+                old.data.orEmpty()
+            } else {
+                require(expected == recipients.size) { "Parent contacts changed. Review the recipient count again." }
+                val values = mapOf("studentIds" to recipients, "sectionId" to sectionId, "localSchoolDate" to date, "teacherId" to uid, "deviceId" to preferences.deviceId, "localTimestamp" to Instant.ofEpochMilli(System.currentTimeMillis()).toString(), "createdAt" to FieldValue.serverTimestamp())
+                tx.set(ref, values); values
+            }
+        }.await()
+        return claim
+    }
 
     private suspend fun register(schoolId: String, name: String): Map<String, Any?> {
         membership(schoolId)
@@ -92,7 +163,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
             } else {
                 require(tx.get(root.collection("academicYears").document(year)).getBoolean("active") == true)
                 require(tx.get(root.collection("gradeLevels").document(grade)).getBoolean("active") == true)
-                tx.set(ref, mapOf("name" to name, "teacherId" to uid, "academicYearId" to year, "gradeLevelId" to grade,
+                tx.set(ref, mapOf("name" to name, "teacherId" to uid, "adviserId" to uid, "academicYearId" to year, "gradeLevelId" to grade,
                     "active" to true, "deviceId" to preferences.deviceId, "createdAt" to FieldValue.serverTimestamp()))
             }
         }.await()
@@ -120,7 +191,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
                 require(values.all { (key, value) -> old.get(key) == value }) { "This request already created a different student." }
             } else {
                 val sectionDoc = tx.get(root.collection("sparkSections").document(section))
-                require(sectionDoc.getString("teacherId") == uid && sectionDoc.getBoolean("active") == true) { "Choose one of your active sections." }
+                require((sectionDoc.getString("adviserId") ?: sectionDoc.getString("teacherId")) == uid && sectionDoc.getBoolean("active") == true) { "Choose one of your active sections." }
                 require(!tx.get(index).exists()) { "Student number is already registered." }
                 tx.set(ref, values + ("createdAt" to FieldValue.serverTimestamp()))
                 tx.set(index, mapOf("studentId" to id, "sectionId" to section))
@@ -170,7 +241,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
             val key = text(event, "idempotencyKey"); val studentId = text(event, "studentId")
             val eventId = text(event, "eventUuid")
             val type = text(event, "eventType"); val date = text(event, "localSchoolDate")
-            require(key == "$schoolId|$studentId|$date|$type" || (event["source"] == "MANUAL" && type in setOf("ARRIVAL", "ABSENT") && key == "$schoolId|$studentId|$date|ROLLCALL|$eventId")) { "Attendance key is invalid." }
+            require(key == "$schoolId|$studentId|$date|${event["subjectId"]}|ROLLCALL|$eventId" || key == "$schoolId|$studentId|$date|$type" || (event["source"] == "MANUAL" && type in setOf("ARRIVAL", "ABSENT") && key == "$schoolId|$studentId|$date|ROLLCALL|$eventId")) { "Attendance key is invalid." }
             require(Instant.parse(text(event, "localTimestamp")).atZone(ZoneId.of(text(event, "timezone"))).toLocalDate().toString() == date)
             val ref = root.collection("sparkAttendance").document(key)
             val outcome = try { db.runTransaction { tx ->
@@ -182,7 +253,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
                     require(student.getString("status") == "ACTIVE") { "Student is not active." }
                     tx.set(ref, mapOf("eventUuid" to eventId, "studentId" to studentId, "sectionId" to student.getString("sectionId"),
                         "teacherId" to uid, "deviceId" to preferences.deviceId, "source" to text(event, "source"), "cardId" to event["cardId"],
-                        "eventType" to type, "localSchoolDate" to date, "localTimestamp" to text(event, "localTimestamp"),
+                        "subjectId" to (event["subjectId"] ?: ""), "attendanceTag" to (event["attendanceTag"] ?: ""), "eventType" to type, "localSchoolDate" to date, "localTimestamp" to text(event, "localTimestamp"),
                         "timezone" to text(event, "timezone"), "smsExpectedCount" to event["smsExpectedCount"], "receivedAt" to FieldValue.serverTimestamp()))
                     "ACCEPTED"
                 }

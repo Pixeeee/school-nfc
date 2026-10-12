@@ -74,6 +74,7 @@ class AttendanceRepository(
         if (student.status != "ACTIVE") return rejected(timestamp, "Student is not active.")
         if (session.sectionId != null && student.sectionId != session.sectionId) return rejected(timestamp, "Student is outside this scanner session's section.")
 
+        if (preferences.backend == "SPARK" && database.sections().all().firstOrNull { it.id == student.sectionId }?.adviserId != FirebaseAuth.getInstance().currentUser?.uid) return rejected(timestamp, "Only the section adviser can use legacy NFC attendance; use your subject roll call.")
         return recordStudent(session, student, card.id, "NFC", now)
     }
 
@@ -85,6 +86,7 @@ class AttendanceRepository(
         require(schoolId == preferences.schoolId) { "This phone belongs to another school." }
         require(preferences.deviceStatus == "APPROVED" && preferences.leaseValid()) { "Renew this phone's authorization before taking attendance." }
         val uid = requireNotNull(FirebaseAuth.getInstance().currentUser?.uid) { "Sign in is required." }
+        if (preferences.backend == "SPARK") require(database.sections().all().firstOrNull { it.id == sectionId }?.adviserId == uid) { "Only the adviser can use section attendance." }
         val student = requireNotNull(database.students().byId(studentId)) { "Synchronize this section's students first." }
         require(student.sectionId == sectionId) { "Student is outside this section." }
         AttendancePolicy.manualRejection(student.status, student.sectionId, preferences.allowedSectionIds)?.let { error(it) }
@@ -97,28 +99,67 @@ class AttendanceRepository(
         recordStudent(session, student, "", "MANUAL", maxOf(now, (last?.createdAtEpochMs ?: 0) + 1))
     }
 
-    private suspend fun recordStudent(session: ActiveScannerSession, student: StudentEntity, cardId: String, source: String, now: Long): ScanOutcome {
+    suspend fun markSubject(schoolId: String, studentId: String, sectionId: String, subjectId: String, tag: String): ScanOutcome = recordMutex.withLock {
+        require(preferences.backend == "SPARK" && tag in setOf("ON_TIME", "LATE", "ABSENT"))
+        require(preferences.cachedRosterValid() && preferences.leaseValid() && preferences.deviceStatus == "APPROVED") { "Synchronize and renew authorization first." }
+        val section = database.sections().all().first { it.id == sectionId && it.id in preferences.allowedSectionIds }
+        val subject = org.json.JSONArray(section.subjectsJson).let { array -> (0 until array.length()).map { array.getJSONObject(it) }.first { it.getString("id") == subjectId } }
+        require(subject.getString("teacherId") == FirebaseAuth.getInstance().currentUser?.uid) { "Only the assigned subject teacher may mark attendance." }
+        val student = requireNotNull(database.students().byId(studentId))
+        require(student.sectionId == sectionId && student.status == "ACTIVE")
+        val now = System.currentTimeMillis(); val date = Instant.ofEpochMilli(now).atZone(ZoneId.of(preferences.schoolTimeZone)).toLocalDate().toString()
+        val previous = database.attendance().latestSubject(schoolId, studentId, date, subjectId)
+        if (previous?.attendanceTag == tag) return@withLock ScanOutcome("DUPLICATE", Instant.ofEpochMilli(now).toString(), reason = "Already recorded.")
+        val session = ActiveScannerSession(UUID.randomUUID().toString(), schoolId, if (tag == "ABSENT") "ABSENT" else "ARRIVAL", sectionId, null)
+        database.scannerSessions().insert(ScannerSessionEntity(session.id, schoolId, session.mode, sectionId, null, requireNotNull(FirebaseAuth.getInstance().currentUser?.uid), now))
+        recordStudent(session, student, "", "MANUAL", maxOf(now, (previous?.createdAtEpochMs ?: 0) + 1), subjectId, tag,
+            "${subject.getString("name")} (${subject.getString("startTime")}–${subject.getString("endTime")})")
+    }
+
+    suspend fun dismissSection(schoolId: String, sectionId: String, timestamp: String, studentIds: List<String>): Int = recordMutex.withLock {
+        require(preferences.cachedRosterValid() && preferences.leaseValid())
+        val section = database.sections().all().first { it.id == sectionId }
+        require(section.adviserId == FirebaseAuth.getInstance().currentUser?.uid)
+        val now = Instant.parse(timestamp).toEpochMilli()
+        val students = database.students().inSection(sectionId).filter { it.status == "ACTIVE" && it.id in studentIds }
+        require(students.size == studentIds.size) { "A dismissal recipient is missing from the synchronized roster. Reconnect and retry Out." }
+        for (student in students) require(database.guardianRoutes().activeForStudent(student.id).isNotEmpty()) { "A parent's consent or contact changed. Refresh the roster before retrying Out." }
+        var queued = 0
+        database.withTransaction {
+        for (student in students) {
+            val session = ActiveScannerSession(UUID.randomUUID().toString(), schoolId, "DISMISSAL", sectionId, null)
+            database.scannerSessions().insert(ScannerSessionEntity(session.id, schoolId, session.mode, sectionId, null, requireNotNull(FirebaseAuth.getInstance().currentUser?.uid), now))
+            val result = recordStudent(session, student, "", "MANUAL", now, scheduleQueues = false)
+            if (result.status == "ACCEPTED") queued += result.smsQueued ?: 0
+        }
+        }
+        QueueScheduler.scheduleSms(context)
+        QueueScheduler.scheduleSync(context)
+        queued
+    }
+
+    private suspend fun recordStudent(session: ActiveScannerSession, student: StudentEntity, cardId: String, source: String, now: Long, subjectId: String = "", attendanceTag: String = "", subjectLabel: String = "", scheduleQueues: Boolean = true): ScanOutcome {
         val timestamp = Instant.ofEpochMilli(now).toString()
         val zone = ZoneId.of(preferences.schoolTimeZone)
         val localDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString()
         val eventUuid = UUID.randomUUID().toString()
-        val key = if (source == "MANUAL" && preferences.backend == "SPARK") "${session.schoolId}|${student.id}|$localDate|ROLLCALL|$eventUuid" else AttendancePolicy.key(session.schoolId, student.id, localDate, session.mode)
+        val key = if (subjectId.isNotEmpty()) "${session.schoolId}|${student.id}|$localDate|$subjectId|ROLLCALL|$eventUuid" else if (source == "MANUAL" && session.mode != "DISMISSAL" && preferences.backend == "SPARK") "${session.schoolId}|${student.id}|$localDate|ROLLCALL|$eventUuid" else AttendancePolicy.key(session.schoolId, student.id, localDate, session.mode)
         val existing = database.attendance().byIdempotencyKey(key)
         if (existing != null) return ScanOutcome("DUPLICATE", timestamp, existing.eventUuid, student.id, student.displayName, student.studentNumber, session.mode, "Attendance was already recorded for this mode today.", existing.smsExpectedCount, student.photoPath)
 
         val routes = database.guardianRoutes().activeForStudent(student.id).filter { route -> when (session.mode) {
             "ARRIVAL", "ABSENT" -> route.receiveArrivalSms
-            "DISMISSAL" -> route.receiveDismissalSms
+            "DISMISSAL" -> source == "MANUAL" || route.receiveDismissalSms
             else -> route.receiveCustomSms
         } }
         val template = if (source == "MANUAL") com.pixeeee.schoolnfc.database.SmsTemplateEntity(
-            "manual_${session.mode.lowercase()}", session.mode, "Roll call notice", "{{schoolName}}: {{studentName}} is ${if (session.mode == "ABSENT") "absent" else "present"} on {{eventDate}} at {{eventTime}}.", true
+            "manual_${session.mode.lowercase()}", session.mode, "Roll call notice", "{{schoolName}}: {{studentName}} ${if (session.mode == "DISMISSAL") "had their section dismissed" else if (attendanceTag == "LATE") "is present late" else if (session.mode == "ABSENT") "is absent" else "is present on time"}${if (subjectLabel.isNotEmpty()) " for $subjectLabel" else ""} on {{eventDate}}. Recorded at {{eventTime}}.", true
         ) else database.smsTemplates().byEventType(session.mode)
         val eligibleRoutes = if (template?.enabled == true) routes else emptyList()
         val status = when (session.mode) { "ABSENT" -> "ABSENT"; "DISMISSAL" -> "DISMISSED"; else -> "PRESENT" }
         val event = AttendanceEventEntity(
             eventUuid = eventUuid, idempotencyKey = key, schoolId = session.schoolId, studentId = student.id, cardId = cardId, source = source, backend = preferences.backend,
-            eventType = session.mode, status = status, localSchoolDate = localDate, localTimestamp = timestamp,
+            subjectId = subjectId, attendanceTag = attendanceTag, eventType = session.mode, status = status, localSchoolDate = localDate, localTimestamp = timestamp,
             elapsedRealtimeMs = SystemClock.elapsedRealtime(), timezone = zone.id, clockTrust = "UNKNOWN",
             deviceId = preferences.deviceId, teacherId = FirebaseAuth.getInstance().currentUser!!.uid,
             scannerSessionId = session.id, smsExpectedCount = eligibleRoutes.size, createdAtEpochMs = now,
@@ -146,8 +187,10 @@ class AttendanceRepository(
             }
             database.syncOutbox().insert(SyncOutboxEntity(aggregateType = "ATTENDANCE_EVENT", aggregateId = eventUuid, createdAtEpochMs = now, updatedAtEpochMs = now))
         }
-        QueueScheduler.scheduleSms(context)
-        QueueScheduler.scheduleSync(context)
+        if (scheduleQueues) {
+            QueueScheduler.scheduleSms(context)
+            QueueScheduler.scheduleSync(context)
+        }
         return ScanOutcome("ACCEPTED", timestamp, eventUuid, student.id, student.displayName, student.studentNumber, session.mode, null, eligibleRoutes.size, student.photoPath)
     }
 

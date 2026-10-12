@@ -25,7 +25,7 @@ class SnapshotSynchronizer(
             database.guardianRoutes().clear(); database.smsTemplates().clear()
         }
         refreshConfig()
-        refreshKind("SECTIONS") { items -> database.sections().clear(); database.sections().upsert(items.filter { it["active"] == true }.map { SectionEntity(it["id"].toString(), it["name"].toString()) }) }
+        refreshKind("SECTIONS") { items -> database.sections().clear(); database.sections().upsert(items.filter { it["active"] == true }.map { SectionEntity(it["id"].toString(), it["name"].toString(), it["adviserId"]?.toString() ?: it["teacherId"]?.toString() ?: "", org.json.JSONArray(it["subjects"] as? List<*> ?: emptyList<Any>()).toString()) }) }
         refreshKind("STUDENTS") { items -> database.students().clear(); database.students().upsert(items.mapNotNull(::student)) }
         refreshKind("CARDS") { items -> database.cards().clear(); database.cards().upsert(items.mapNotNull(::card)) }
         refreshKind("GUARDIANS") { items -> database.guardianRoutes().clear(); database.guardianRoutes().upsert(items.mapNotNull(::guardianRoute)) }

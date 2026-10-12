@@ -59,8 +59,18 @@ interface Section {
   id: string;
   name: string;
   teacherId: string;
+  adviserId?: string;
+  subjectTeacherIds?: string[];
   gradeLevelId: string;
   academicYearId: string;
+}
+interface Subject {
+  id: string;
+  sectionId: string;
+  teacherId: string;
+  name: string;
+  startTime: string;
+  endTime: string;
 }
 interface Choice {
   id: string;
@@ -89,6 +99,9 @@ interface Attendance {
   sectionId: string;
   status: string;
   source: string;
+  subjectId?: string;
+  attendanceTag?: string;
+  localTimestamp?: string;
 }
 interface Device {
   id: string;
@@ -129,6 +142,7 @@ export function SparkPortal() {
   const [tab, setTab] = useState<Tab>("overview");
   const [navOpen, setNavOpen] = useState(false);
   const [sections, setSections] = useState<Section[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [years, setYears] = useState<Choice[]>([]);
   const [grades, setGrades] = useState<Choice[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -153,7 +167,7 @@ export function SparkPortal() {
   selection.current = { selected, date };
   const admin = overview?.profile.role === "SCHOOL_ADMIN";
   const owner =
-    sections.find((s) => s.id === selected)?.teacherId === user?.uid;
+    sections.find((s) => s.id === selected)?.adviserId === user?.uid;
   useEffect(
     () =>
       onAuthStateChanged(getFirebase().auth, (next) => {
@@ -199,11 +213,13 @@ export function SparkPortal() {
     setDate((current) => current || result.date);
     const setup = await request<{
       sections: Section[];
+      subjects?: Subject[];
       years: Choice[];
       grades: Choice[];
     }>("sectionList");
     if (!current()) return;
     setSections(setup.sections);
+    setSubjects(setup.subjects || []);
     setYears(setup.years);
     setGrades(setup.grades);
     setSelected((current) =>
@@ -816,6 +832,147 @@ export function SparkPortal() {
                   </form>
                 </Card>
               )}
+              {selected && admin && (
+                <Card>
+                  <h2>Adviser and subjects</h2>
+                  <Field label="Section adviser">
+                    <select
+                      value={
+                        sections.find((s) => s.id === selected)?.adviserId ||
+                        sections.find((s) => s.id === selected)?.teacherId ||
+                        ""
+                      }
+                      disabled={busy}
+                      onChange={(e) => {
+                        setBusy(true);
+                        void request("sectionAssign", {
+                          sectionId: selected,
+                          adviserId: e.target.value,
+                        })
+                          .then(load)
+                          .catch((e) => setError(e.message))
+                          .finally(() => setBusy(false));
+                      }}
+                    >
+                      <option value="">Choose adviser</option>
+                      {teachers
+                        .filter((t) => t.status === "ACTIVE")
+                        .map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.displayName}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                  {subjects
+                    .filter((s) => s.sectionId === selected)
+                    .map((subject) => (
+                      <form
+                        key={subject.id}
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const data = new FormData(e.currentTarget);
+                          setBusy(true);
+                          void request("subjectSet", {
+                            subjectId: subject.id,
+                            sectionId: selected,
+                            teacherId: String(data.get("teacherId")),
+                            name: String(data.get("name")),
+                            startTime: String(data.get("startTime")),
+                            endTime: String(data.get("endTime")),
+                          })
+                            .then(load)
+                            .catch((e) => setError(e.message))
+                            .finally(() => setBusy(false));
+                        }}
+                      >
+                        <Field label="Subject">
+                          <input
+                            name="name"
+                            defaultValue={subject.name}
+                            required
+                            maxLength={80}
+                          />
+                        </Field>
+                        <Field label="Subject teacher">
+                          <select
+                            name="teacherId"
+                            defaultValue={subject.teacherId}
+                            required
+                          >
+                            {teachers
+                              .filter((t) => t.status === "ACTIVE")
+                              .map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.displayName}
+                                </option>
+                              ))}
+                          </select>
+                        </Field>
+                        <Field label="Start">
+                          <input
+                            name="startTime"
+                            type="time"
+                            defaultValue={subject.startTime}
+                            required
+                          />
+                        </Field>
+                        <Field label="End">
+                          <input
+                            name="endTime"
+                            type="time"
+                            defaultValue={subject.endTime}
+                            required
+                          />
+                        </Field>
+                        <Button disabled={busy}>Save assignment</Button>
+                      </form>
+                    ))}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const data = new FormData(e.currentTarget);
+                      setBusy(true);
+                      void request("subjectSet", {
+                        subjectId: crypto.randomUUID(),
+                        sectionId: selected,
+                        teacherId: String(data.get("teacherId")),
+                        name: String(data.get("name")),
+                        startTime: String(data.get("startTime")),
+                        endTime: String(data.get("endTime")),
+                      })
+                        .then(load)
+                        .then(() => setNotice("Subject assigned."))
+                        .catch((e) => setError(e.message))
+                        .finally(() => setBusy(false));
+                    }}
+                  >
+                    <h3>Add subject</h3>
+                    <Field label="Subject name">
+                      <input name="name" required maxLength={80} />
+                    </Field>
+                    <Field label="Assigned teacher">
+                      <select name="teacherId" required>
+                        <option value="">Choose teacher</option>
+                        {teachers
+                          .filter((t) => t.status === "ACTIVE")
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.displayName}
+                            </option>
+                          ))}
+                      </select>
+                    </Field>
+                    <Field label="Start">
+                      <input name="startTime" type="time" required />
+                    </Field>
+                    <Field label="End">
+                      <input name="endTime" type="time" required />
+                    </Field>
+                    <Button disabled={busy}>Add subject</Button>
+                  </form>
+                </Card>
+              )}
               <div className="portal-roster-controls">
                 <Field label="Teacher">
                   <select
@@ -848,7 +1005,10 @@ export function SparkPortal() {
                     <option value="">Choose a section</option>
                     {sections
                       .filter(
-                        (s) => !teacherFilter || s.teacherId === teacherFilter,
+                        (s) =>
+                          !teacherFilter ||
+                          (s.adviserId || s.teacherId) === teacherFilter ||
+                          !!s.subjectTeacherIds?.includes(teacherFilter),
                       )
                       .map((s) => (
                         <option key={s.id} value={s.id}>
@@ -1093,7 +1253,9 @@ export function SparkPortal() {
                       <tr>
                         <th>Student</th>
                         <th>Section</th>
+                        <th>Subject</th>
                         <th>Status</th>
+                        <th>Recorded time</th>
                         <th>Source</th>
                       </tr>
                     </thead>
@@ -1105,7 +1267,11 @@ export function SparkPortal() {
                             sections.some(
                               (s) =>
                                 s.id === a.sectionId &&
-                                s.teacherId === teacherFilter,
+                                ((s.adviserId || s.teacherId) ===
+                                  teacherFilter ||
+                                  !!s.subjectTeacherIds?.includes(
+                                    teacherFilter,
+                                  )),
                             ),
                         )
                         .map((a) => (
@@ -1117,8 +1283,22 @@ export function SparkPortal() {
                               {sections.find((s) => s.id === a.sectionId)
                                 ?.name || a.sectionId}
                             </td>
+                            <td data-label="Subject">
+                              {subjects.find((s) => s.id === a.subjectId)
+                                ?.name || "Legacy section"}
+                            </td>
                             <td data-label="Status">
-                              <StatusBadge value={a.status} />
+                              <StatusBadge
+                                value={a.attendanceTag || a.status}
+                              />
+                            </td>
+                            <td data-label="Recorded time">
+                              {a.localTimestamp
+                                ? new Date(a.localTimestamp).toLocaleString(
+                                    "en-PH",
+                                    { timeZone: "Asia/Manila" },
+                                  )
+                                : "—"}
                             </td>
                             <td data-label="Source">
                               {a.source === "WEB"

@@ -157,15 +157,45 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
 
     @PluginMethod fun listSections(call: PluginCall) = launch(call) {
         val items = database.sections().all().filter { it.id in preferences.allowedSectionIds }
-        call.resolve(JSObject().put("sections", JSArray(items.map { JSObject().put("id", it.id).put("name", it.name) })))
+        call.resolve(JSObject().put("sections", JSArray(items.map { JSObject().put("id", it.id).put("name", it.name).put("adviserId", it.adviserId).put("isAdviser", it.adviserId == cloud.currentUser()?.uid).put("subjects", JSArray(it.subjectsJson)) })))
     }
 
     @PluginMethod fun getTeacherSetup(call: PluginCall) = launch(call) {
         val result = cloud.call("getTeacherSetup", teacherContext())
         val sections = (result["sections"] as? List<*>)?.filterIsInstance<Map<*, *>>() ?: emptyList()
-        database.sections().upsert(sections.map { SectionEntity(it["id"].toString(), it["name"].toString()) })
+        database.sections().upsert(sections.map { SectionEntity(it["id"].toString(), it["name"].toString(), it["adviserId"]?.toString() ?: it["teacherId"]?.toString() ?: "", org.json.JSONArray(it["subjects"] as? List<*> ?: emptyList<Any>()).toString()) })
         preferences.allowedSectionIds = sections.map { it["id"].toString() }.toSet()
+        val enriched = sections.map { it + ("isAdviser" to (it["adviserId"] == cloud.currentUser()?.uid)) }
+        resolve(call, result + ("sections" to enriched))
+    }
+
+    @PluginMethod fun updateSubject(call: PluginCall) = launch(call) {
+        val result = cloud.call("updateSubject", teacherContext() + listOf("subjectId", "name", "startTime", "endTime").associateWith { required(call, it) })
+        SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
         resolve(call, result)
+    }
+
+    @PluginMethod fun subjectAttendance(call: PluginCall) = launch(call) {
+        resolve(call, cloud.call("subjectAttendance", teacherContext() + mapOf("sectionId" to required(call, "sectionId"), "date" to required(call, "date"))))
+    }
+
+    @PluginMethod fun markSubject(call: PluginCall) = launch(call) {
+        val outcome = attendance.markSubject(requireNotNull(preferences.schoolId), required(call, "studentId"), required(call, "sectionId"), required(call, "subjectId"), required(call, "tag"))
+        onScan(outcome)
+        call.resolve(JSObject().put("status", outcome.status).put("reason", outcome.reason).put("localTimestamp", outcome.localTimestamp).put("smsQueued", outcome.smsQueued))
+    }
+
+    @PluginMethod fun dismissalCount(call: PluginCall) = launch(call) {
+        resolve(call, cloud.call("dismissalPreview", teacherContext() + mapOf("sectionId" to required(call, "sectionId"))))
+    }
+
+    @PluginMethod fun dismissSection(call: PluginCall) = launch(call) {
+        SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
+        val sectionId = required(call, "sectionId")
+        // A server claim can be replayed on this phone after interruption; each local student queue is unique.
+        val claim = cloud.call("claimDismissal", teacherContext() + mapOf("sectionId" to sectionId, "date" to LocalDate.now(ZoneId.of(preferences.schoolTimeZone)).toString(), "expectedCount" to call.getInt("expectedCount")))
+        val queued = attendance.dismissSection(requireNotNull(preferences.schoolId), sectionId, claim["localTimestamp"].toString(), (claim["studentIds"] as? List<*>)?.map { it.toString() }.orEmpty())
+        call.resolve(JSObject().put("queued", queued))
     }
 
     @PluginMethod fun createSection(call: PluginCall) = launch(call) {
@@ -193,9 +223,16 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         require(sectionId in preferences.allowedSectionIds && preferences.leaseValid()) { "Section authorization is missing or expired." }
         require(preferences.cachedRosterValid()) { "Synchronize this account's roster first." }
         val date = LocalDate.now(ZoneId.of(preferences.schoolTimeZone)).toString()
+        val selectedSubject = call.getString("subjectId") ?: ""
+        val remote = if (preferences.backend == "SPARK" && selectedSubject.isNotEmpty()) runCatching {
+            (cloud.call("subjectAttendance", teacherContext() + mapOf("sectionId" to sectionId, "date" to date))["attendance"] as? List<*>)?.filterIsInstance<Map<*, *>>().orEmpty()
+        }.getOrDefault(emptyList()) else emptyList()
         val students = database.students().inSection(sectionId).map { student ->
             val key = AttendancePolicy.key(requireNotNull(preferences.schoolId), student.id, date, "ARRIVAL")
-            val event = database.attendance().latestRollCall(requireNotNull(preferences.schoolId), student.id, date, requireNotNull(cloud.currentUser()?.uid), preferences.backend)
+            val subjectId = call.getString("subjectId") ?: ""
+            val event = if (subjectId.isNotEmpty()) database.attendance().latestSubject(requireNotNull(preferences.schoolId), student.id, date, subjectId) else database.attendance().latestRollCall(requireNotNull(preferences.schoolId), student.id, date, requireNotNull(cloud.currentUser()?.uid), preferences.backend)
+            val server = remote.filter { it["studentId"] == student.id && it["subjectId"] == selectedSubject }.maxByOrNull { it["localTimestamp"].toString() }
+            val tag = if (server != null && (event == null || server["localTimestamp"].toString() > event.localTimestamp)) server["attendanceTag"]?.toString() ?: "UNMARKED" else event?.attendanceTag?.takeIf { it.isNotEmpty() } ?: event?.status ?: "UNMARKED"
             val statuses = event?.let { database.smsOutbox().statusesForEvent(it.eventUuid) } ?: emptyList()
             val smsStatus = when {
                 statuses.isEmpty() -> "NONE"
@@ -205,7 +242,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
                 else -> "QUEUED"
             }
             JSObject().put("id", student.id).put("displayName", student.displayName).put("studentNumber", student.studentNumber)
-                .put("sectionId", student.sectionId).put("present", event?.status == "PRESENT").put("attendanceStatus", event?.status ?: "UNMARKED").put("smsStatus", smsStatus)
+                .put("sectionId", student.sectionId).put("present", tag in setOf("PRESENT", "ON_TIME", "LATE")).put("attendanceStatus", tag).put("smsStatus", smsStatus)
                 .put("syncStatus", event?.syncStatus)
         }
         call.resolve(JSObject().put("students", JSArray(students)).put("localSchoolDate", date))
@@ -337,20 +374,22 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     private fun writeState() = JSObject().put("phase", currentWritePhase).put("studentId", currentWriteStudent).put("cardId", currentWriteCard).put("message", currentWriteMessage)
 
     private fun feedback(status: String) {
-        val success = status == "ACCEPTED"
-        tone.startTone(if (success) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_NACK, if (success) 110 else 180)
-        val vibrator: Vibrator = if (Build.VERSION.SDK_INT >= 31) {
-            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        // Feedback must never interrupt an already saved attendance/SMS result.
+        runCatching {
+            val success = status == "ACCEPTED"
+            tone.startTone(if (success) ToneGenerator.TONE_PROP_ACK else ToneGenerator.TONE_PROP_NACK, if (success) 110 else 180)
         }
-        if (Build.VERSION.SDK_INT >= 26) vibrator.vibrate(VibrationEffect.createOneShot(if (success) 70 else 160, VibrationEffect.DEFAULT_AMPLITUDE))
-        else vibrateLegacy(vibrator, if (success) 70 else 160)
+        runCatching {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.VIBRATE) != PackageManager.PERMISSION_GRANTED) return@runCatching
+            val vibrator = if (Build.VERSION.SDK_INT >= 31) {
+                (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            if (vibrator?.hasVibrator() == true) vibrator.vibrate(VibrationEffect.createOneShot(if (status == "ACCEPTED") 70 else 160, VibrationEffect.DEFAULT_AMPLITUDE))
+        }
     }
-
-    @Suppress("DEPRECATION")
-    private fun vibrateLegacy(vibrator: Vibrator, duration: Long) { vibrator.vibrate(duration) }
 
     private fun normalizePhone(input: String): String {
         val compact = input.trim().replace(Regex("[\\s()-]"), "")

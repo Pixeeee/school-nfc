@@ -12,6 +12,21 @@ import type {
 } from "./types";
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
+  async updateSubject(): Promise<{ subjectId: string }> {
+    throw new Error("Subjects require the Android app.");
+  }
+  async markSubject(): Promise<import("./types").ScanResult> {
+    throw new Error("Attendance requires the Android app.");
+  }
+  async subjectAttendance(): Promise<{ attendance: [] }> {
+    throw new Error("Attendance requires the Android app.");
+  }
+  async dismissalCount(): Promise<{ count: number }> {
+    throw new Error("Out requires the Android app.");
+  }
+  async dismissSection(): Promise<{ queued: number }> {
+    throw new Error("Out requires the Android app.");
+  }
   private signedIn = false;
   private write: CardWriteState = { phase: "IDLE" };
   private device: DeviceState = {

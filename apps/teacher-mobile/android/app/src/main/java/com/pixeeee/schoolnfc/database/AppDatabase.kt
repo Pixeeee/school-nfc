@@ -11,7 +11,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [SectionEntity::class, StudentEntity::class, CardEntity::class, GuardianRouteEntity::class, SmsTemplateEntity::class,
         ScannerSessionEntity::class, AttendanceEventEntity::class, SmsOutboxEntity::class, SyncOutboxEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -38,10 +38,18 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `sms_outbox` ADD COLUMN `ownerUid` TEXT NOT NULL DEFAULT ''")
             }
         }
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `sections` ADD COLUMN `adviserId` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `sections` ADD COLUMN `subjectsJson` TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE `attendance_events` ADD COLUMN `subjectId` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `attendance_events` ADD COLUMN `attendanceTag` TEXT NOT NULL DEFAULT ''")
+            }
+        }
         @Volatile private var instance: AppDatabase? = null
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "school-nfc.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build().also { instance = it }
         }
     }

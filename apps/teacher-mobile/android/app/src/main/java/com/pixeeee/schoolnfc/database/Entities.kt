@@ -7,7 +7,9 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "sections")
-data class SectionEntity(@PrimaryKey val id: String, val name: String)
+data class SectionEntity(@PrimaryKey val id: String, val name: String,
+    @ColumnInfo(defaultValue = "''") val adviserId: String = "",
+    @ColumnInfo(defaultValue = "'[]'") val subjectsJson: String = "[]")
 
 @Entity(tableName = "students", indices = [Index("studentNumber"), Index("sectionId"), Index("displayName")])
 data class StudentEntity(
@@ -89,6 +91,8 @@ data class AttendanceEventEntity(
     val cardId: String,
     @ColumnInfo(defaultValue = "'NFC'") val source: String = "NFC",
     @ColumnInfo(defaultValue = "'FUNCTIONS'") val backend: String = "FUNCTIONS",
+    @ColumnInfo(defaultValue = "''") val subjectId: String = "",
+    @ColumnInfo(defaultValue = "''") val attendanceTag: String = "",
     val eventType: String,
     val status: String,
     val localSchoolDate: String,

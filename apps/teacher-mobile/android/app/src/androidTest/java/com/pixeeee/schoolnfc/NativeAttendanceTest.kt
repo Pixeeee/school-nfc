@@ -7,7 +7,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.functions.FirebaseFunctions
 import com.pixeeee.schoolnfc.attendance.AttendanceRepository
 import com.pixeeee.schoolnfc.cloud.bridgeResponse
 import com.pixeeee.schoolnfc.database.*
@@ -64,10 +63,12 @@ class NativeAttendanceTest {
         }
         old.version = 1
         old.close()
-        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build()
+        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build()
         try {
             assertEquals("NFC", upgraded.attendance().byUuid("preserved")!!.source)
             assertNotNull(upgraded.smsOutbox().byMessageId("preserved"))
+            assertEquals("", upgraded.attendance().byUuid("preserved")!!.subjectId)
+            assertEquals("", upgraded.attendance().byUuid("preserved")!!.attendanceTag)
             assertEquals("FUNCTIONS", upgraded.attendance().byUuid("preserved")!!.backend)
             assertEquals("", upgraded.smsOutbox().byMessageId("preserved")!!.ownerUid)
             assertTrue(upgraded.sections().all().isEmpty())
@@ -78,7 +79,6 @@ class NativeAttendanceTest {
         if (FirebaseApp.getApps(context).isEmpty()) FirebaseApp.initializeApp(context, FirebaseOptions.Builder().setApplicationId("test-school-app").setApiKey("test-key").setProjectId("demo-school-nfc").build())
         val auth = FirebaseAuth.getInstance()
         auth.useEmulator("10.0.2.2", 9099)
-        FirebaseFunctions.getInstance("asia-southeast1").useEmulator("10.0.2.2", 5001)
         runCatching { com.google.firebase.firestore.FirebaseFirestore.getInstance().useEmulator("10.0.2.2", 8080) }
         auth.signInAnonymously().await()
         val prefs = DevicePreferences(context)
@@ -88,6 +88,7 @@ class NativeAttendanceTest {
         prefs.snapshotOwner = "${prefs.backend}|${prefs.schoolId}|${prefs.authorizationUserId}"
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {
+            database.sections().upsert(listOf(SectionEntity("section_a", "A", auth.currentUser!!.uid)))
             database.students().upsert(listOf(StudentEntity("student_a", "001", "Juan Santos", "section_a", "ACTIVE")))
             database.guardianRoutes().upsert(listOf(GuardianRouteEntity("route_a", "student_a", "parent_a", CryptoManager().encrypt("+639171234567"), "VERIFIED", "RECORDED", "ACTIVE", true, false, false, false)))
             val repository = AttendanceRepository(context, database, prefs)
@@ -119,6 +120,24 @@ class NativeAttendanceTest {
             assertTrue(messages.any { it.renderedMessage.contains("is absent") && CryptoManager().decrypt(it.encryptedPhone) == "+639171234567" })
             assertEquals("ACCEPTED", repository.markPresent("test_school", "student_a", "section_a").status)
             assertEquals(3, database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend).size)
+            database.sections().upsert(listOf(SectionEntity("section_a", "A", uid, org.json.JSONArray(listOf(
+                mapOf("id" to "math", "teacherId" to uid, "name" to "Math", "startTime" to "08:00", "endTime" to "09:00"),
+                mapOf("id" to "science", "teacherId" to uid, "name" to "Science", "startTime" to "09:00", "endTime" to "10:00")
+            )).toString())))
+            assertEquals("ACCEPTED", repository.markSubject("test_school", "student_a", "section_a", "math", "ON_TIME").status)
+            assertEquals("ACCEPTED", repository.markSubject("test_school", "student_a", "section_a", "science", "ABSENT").status)
+            assertEquals("DUPLICATE", repository.markSubject("test_school", "student_a", "section_a", "math", "ON_TIME").status)
+            assertEquals("ACCEPTED", repository.markSubject("test_school", "student_a", "section_a", "math", "LATE").status)
+            val date = java.time.LocalDate.now(java.time.ZoneId.of(prefs.schoolTimeZone)).toString()
+            assertEquals("LATE", database.attendance().latestSubject("test_school", "student_a", date, "math")!!.attendanceTag)
+            assertEquals("ABSENT", database.attendance().latestSubject("test_school", "student_a", date, "science")!!.attendanceTag)
+            assertTrue(database.smsOutbox().dirtyForScope(100, "test_school", uid, prefs.backend).any { it.renderedMessage.contains("Math (08:00–09:00)") && it.renderedMessage.contains("present late") })
+            val dismissalTime = Instant.now().toString()
+            assertEquals(1, repository.dismissSection("test_school", "section_a", dismissalTime, listOf("student_a")))
+            // A fresh repository simulates restart after claiming/queueing. Out never queues another text.
+            assertEquals(0, AttendanceRepository(context, database, prefs).dismissSection("test_school", "section_a", dismissalTime, listOf("student_a")))
+            assertEquals(1, database.attendance().pending(100).count { it.eventType == "DISMISSAL" })
+            assertTrue(database.smsOutbox().dirtyForScope(100, "test_school", uid, prefs.backend).any { it.renderedMessage.contains("section dismissed") })
             val now = System.currentTimeMillis()
             database.smsOutbox().insert(SmsOutboxEntity(messageId = "test_message", idempotencyKey = "TEST|test_message", attendanceEventUuid = "not_an_event", guardianId = "TEST", encryptedPhone = "not_used", renderedMessage = "Test", subscriptionId = null, cloudDirty = false, createdAtEpochMs = now, updatedAtEpochMs = now))
             database.smsOutbox().markPartSent("test_message", Instant.now().toString(), now)

@@ -509,4 +509,63 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
     await db.doc("loginNames/" + username).delete();
     await db.recursiveDelete(db.doc("schools/" + bootstrapSchool));
   });
+  it("assigns adviser and subjects only through administrator, preserving creator and roster", async () => {
+    const sectionId = "assigned-" + randomUUID();
+    await db
+      .doc(`${base}/sparkSections/${sectionId}`)
+      .set({ name: "Shared", teacherId: "teacherA", active: true });
+    expect(
+      (await call("sectionAssign", { sectionId, adviserId: "teacherB" })).code,
+    ).toBe(403);
+    expect(
+      (
+        await call(
+          "sectionAssign",
+          { sectionId, adviserId: "missing" },
+          "adminA",
+        )
+      ).code,
+    ).toBe(400);
+    expect(
+      (
+        await call(
+          "sectionAssign",
+          { sectionId, adviserId: "teacherB" },
+          "adminA",
+        )
+      ).code,
+    ).toBe(200);
+    const subjectId = randomUUID();
+    const fields = {
+      subjectId,
+      sectionId,
+      teacherId: "teacherA",
+      name: "Math",
+      startTime: "08:00",
+      endTime: "09:00",
+    };
+    expect((await call("subjectSet", fields)).code).toBe(403);
+    expect(
+      (await call("subjectSet", { ...fields, endTime: "07:00" }, "adminA"))
+        .code,
+    ).toBe(400);
+    expect((await call("subjectSet", fields, "adminA")).code).toBe(200);
+    let section = (
+      await db.doc(`${base}/sparkSections/${sectionId}`).get()
+    ).data();
+    expect(section.teacherId).toBe("teacherA");
+    expect(section.adviserId).toBe("teacherB");
+    expect(section.subjectTeacherIds).toEqual(["teacherA"]);
+    expect(
+      (await call("subjectSet", { ...fields, teacherId: "teacherB" }, "adminA"))
+        .code,
+    ).toBe(200);
+    section = (await db.doc(`${base}/sparkSections/${sectionId}`).get()).data();
+    expect(section.subjectTeacherIds).toEqual(["teacherB"]);
+    expect(
+      (await call("sectionList", {}, "adminA")).body.subjects.some(
+        (s) => s.id === subjectId,
+      ),
+    ).toBe(true);
+  });
 });

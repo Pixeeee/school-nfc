@@ -214,4 +214,80 @@ describe("portal obsolete response protection", () => {
     await flush();
     expect(container.textContent).not.toContain("Generated-Test-Password");
   });
+  it("filters subject teacher attendance only within that teacher's assigned section", async () => {
+    session.currentUser = user("admin");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, options) => {
+        const input = JSON.parse(options.body);
+        if (input.action === "overview")
+          return response(profile("admin", "SCHOOL_ADMIN"));
+        if (input.action === "sectionList")
+          return response({
+            ...setup,
+            sections: [
+              {
+                ...setup.sections[0],
+                teacherId: "adviserA",
+                subjectTeacherIds: ["subjectTeacher"],
+              },
+              {
+                ...setup.sections[1],
+                teacherId: "adviserB",
+                subjectTeacherIds: [],
+              },
+            ],
+          });
+        if (input.action === "teacherList")
+          return response({
+            teachers: [
+              {
+                id: "subjectTeacher",
+                displayName: "Subject teacher",
+                email: "subject@example.test",
+                status: "ACTIVE",
+              },
+            ],
+          });
+        if (input.action === "attendanceList")
+          return response({
+            attendance: [
+              {
+                id: "recordA",
+                studentId: "studentA",
+                studentName: "Assigned student",
+                sectionId: "A",
+                status: "ON_TIME",
+                source: "ANDROID",
+              },
+              {
+                id: "recordB",
+                studentId: "studentB",
+                studentName: "Unrelated student",
+                sectionId: "B",
+                status: "ABSENT",
+                source: "ANDROID",
+              },
+            ],
+          });
+        return response({ students: [], devices: [] });
+      }),
+    );
+    await act(async () => root.render(<SparkPortal />));
+    await flush();
+    const attendance = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Attendance",
+    )!;
+    await act(async () => attendance.click());
+    await flush();
+    expect(container.textContent).toContain("Unrelated student");
+    const picker = container.querySelector("select")!;
+    await act(async () => {
+      picker.value = "subjectTeacher";
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+    expect(container.textContent).toContain("Assigned student");
+    expect(container.textContent).not.toContain("Unrelated student");
+  });
 });

@@ -28,6 +28,24 @@ const schemas = {
       name: text(120),
     })
     .strict(),
+  sectionAssign: z
+    .object({
+      action: z.literal("sectionAssign"),
+      sectionId: id,
+      adviserId: id,
+    })
+    .strict(),
+  subjectSet: z
+    .object({
+      action: z.literal("subjectSet"),
+      subjectId: id,
+      sectionId: id,
+      teacherId: id,
+      name: text(80),
+      startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+      endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    })
+    .strict(),
   sectionList: z.object({ action: z.literal("sectionList") }).strict(),
   sectionCreate: z
     .object({
@@ -90,6 +108,8 @@ const schemas = {
     .strict(),
 };
 const adminActions = new Set([
+  "sectionAssign",
+  "subjectSet",
   "teacherList",
   "teacherCreate",
   "deviceList",
@@ -106,10 +126,12 @@ export function latestNativeRollCall(records) {
           (a.localTimestamp || "").localeCompare(b.localTimestamp || ""),
         )
         .map((x) => [
-          x.studentId,
+          `${x.studentId}|${x.subjectId || "LEGACY"}`,
           {
             ...x,
-            status: x.eventType === "ABSENT" ? "ABSENT" : "PRESENT",
+            status:
+              x.attendanceTag ||
+              (x.eventType === "ABSENT" ? "ABSENT" : "PRESENT"),
             source: "ANDROID",
           },
         ]),
@@ -140,7 +162,7 @@ export function createPortalHandler({
     if (
       !snap.exists ||
       !snap.data().active ||
-      (!isAdmin && snap.data().teacherId !== uid)
+      (!isAdmin && (snap.data().adviserId || snap.data().teacherId) !== uid)
     )
       throw new RequestError(403, "This section is not assigned to you.");
     return snap.data();
@@ -251,6 +273,73 @@ export function createPortalHandler({
         ? db.collection(`${base}/sparkSections`)
         : db.collection(`${base}/sparkSections`).where("teacherId", "==", uid);
       switch (input.action) {
+        case "sectionAssign": {
+          const teacher = await db
+            .doc(`${base}/members/${input.adviserId}`)
+            .get();
+          if (
+            !teacher.exists ||
+            teacher.data().status !== "ACTIVE" ||
+            teacher.data().role !== "TEACHER"
+          )
+            throw new RequestError(400, "Choose an active teacher.");
+          await requireSection(input.sectionId, uid, true);
+          await db
+            .doc(`${base}/sparkSections/${input.sectionId}`)
+            .update({ adviserId: input.adviserId });
+          return res.json({ adviserId: input.adviserId });
+        }
+        case "subjectSet": {
+          if (input.endTime <= input.startTime)
+            throw new RequestError(400, "End time must be after start time.");
+          await requireSection(input.sectionId, uid, true);
+          const teacher = await db
+            .doc(`${base}/members/${input.teacherId}`)
+            .get();
+          if (
+            !teacher.exists ||
+            teacher.data().status !== "ACTIVE" ||
+            teacher.data().role !== "TEACHER"
+          )
+            throw new RequestError(400, "Choose an active teacher.");
+          await db.runTransaction(async (tx) => {
+            const ref = db.doc(`${base}/sparkSubjects/${input.subjectId}`);
+            const previous = await tx.get(ref);
+            if (
+              previous.exists &&
+              previous.data().sectionId !== input.sectionId
+            )
+              throw new RequestError(
+                409,
+                "Subject belongs to another section.",
+              );
+            const others = await tx.get(
+              db
+                .collection(`${base}/sparkSubjects`)
+                .where("sectionId", "==", input.sectionId),
+            );
+            const teacherIds = [
+              ...new Set([
+                input.teacherId,
+                ...others.docs
+                  .filter((d) => d.id !== input.subjectId)
+                  .map((d) => d.data().teacherId),
+              ]),
+            ];
+            tx.set(ref, {
+              sectionId: input.sectionId,
+              teacherId: input.teacherId,
+              name: input.name,
+              startTime: input.startTime,
+              endTime: input.endTime,
+              active: true,
+            });
+            tx.update(db.doc(`${base}/sparkSections/${input.sectionId}`), {
+              subjectTeacherIds: teacherIds,
+            });
+          });
+          return res.json({ subjectId: input.subjectId });
+        }
         case "overview": {
           const sections = rows(await sectionQuery.limit(250).get()).filter(
             (s) => s.active,
@@ -291,8 +380,8 @@ export function createPortalHandler({
               ]),
             );
             decisions.forEach((x) => statuses.set(x.studentId, x.status));
-            present += [...statuses.values()].filter(
-              (s) => s === "PRESENT",
+            present += [...statuses.values()].filter((s) =>
+              ["PRESENT", "ON_TIME", "LATE"].includes(s),
             ).length;
             absent += [...statuses.values()].filter(
               (s) => s === "ABSENT",
@@ -383,6 +472,9 @@ export function createPortalHandler({
             sections: rows(await sectionQuery.limit(250).get()).filter(
               (x) => x.active,
             ),
+            subjects: rows(
+              await db.collection(`${base}/sparkSubjects`).limit(1000).get(),
+            ),
             years: rows(
               await db
                 .collection(`${base}/academicYears`)
@@ -431,6 +523,7 @@ export function createPortalHandler({
               gradeLevelId: input.gradeLevelId,
               academicYearId: input.academicYearId,
               teacherId: uid,
+              adviserId: uid,
               active: true,
               deviceId: "WEB",
               createdAt: FieldValue.serverTimestamp(),
@@ -604,9 +697,12 @@ export function createPortalHandler({
               .get(),
           );
           const merged = new Map(
-            latestNativeRollCall(native).map((x) => [x.studentId, x]),
+            latestNativeRollCall(native).map((x) => [
+              `${x.studentId}|${x.subjectId || "LEGACY"}`,
+              x,
+            ]),
           );
-          web.forEach((x) => merged.set(x.studentId, x));
+          web.forEach((x) => merged.set(`${x.studentId}|LEGACY`, x));
           return res.json({
             attendance: [...merged.values()],
             date: input.date,

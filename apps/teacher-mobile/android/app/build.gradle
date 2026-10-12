@@ -11,12 +11,20 @@ android {
         applicationId 'com.example.attendance_check'
         minSdk 26
         targetSdk 36
-        versionCode 3
-        versionName '1.2.0'
-        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        versionCode 4
+        versionName '1.3.0'
+        testInstrumentationRunner project.hasProperty('releaseSmoke') ? 'com.pixeeee.schoolnfc.ReleaseSmokeInstrumentation' : 'androidx.test.runner.AndroidJUnitRunner'
         buildConfigField "boolean", "FIREBASE_SPARK", "true"
         buildConfigField "String", "PORTAL_URL", '"https://school-attendance-dashboard-two.vercel.app/api/portal"'
     }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    testBuildType project.findProperty('androidTestBuildType') ?: 'debug'
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_21; targetCompatibility JavaVersion.VERSION_21 }
     kotlinOptions { jvmTarget = '21' }
@@ -25,6 +33,8 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
     androidTestImplementation 'androidx.test:runner:1.7.0'
+    // Match the instrumented release runtime to AndroidX Test's coroutine adapter.
+    implementation 'androidx.concurrent:concurrent-futures-ktx:1.2.0'
     implementation platform('com.google.firebase:firebase-bom:34.3.0')
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-functions'

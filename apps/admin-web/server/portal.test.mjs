@@ -160,3 +160,36 @@ it("uses the latest native Present/Absent change for each student", () => {
     ])[0].status,
   ).toBe("PRESENT");
 });
+it("keeps independent latest subject tags for the same student/day", () => {
+  const records = [
+    {
+      studentId: "a",
+      subjectId: "math",
+      attendanceTag: "ON_TIME",
+      eventType: "ARRIVAL",
+      localTimestamp: "2026-10-12T08:00:00Z",
+    },
+    {
+      studentId: "a",
+      subjectId: "science",
+      attendanceTag: "ABSENT",
+      eventType: "ABSENT",
+      localTimestamp: "2026-10-12T09:00:00Z",
+    },
+    {
+      studentId: "a",
+      subjectId: "math",
+      attendanceTag: "LATE",
+      eventType: "ARRIVAL",
+      localTimestamp: "2026-10-12T08:05:00Z",
+    },
+  ];
+  expect(
+    latestNativeRollCall(records)
+      .map((x) => [x.subjectId, x.status])
+      .sort(),
+  ).toEqual([
+    ["math", "LATE"],
+    ["science", "ABSENT"],
+  ]);
+});
