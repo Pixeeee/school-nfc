@@ -107,6 +107,11 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
 
     @PluginMethod fun getDeviceState(call: PluginCall) = launch(call) { call.resolve(deviceState()) }
 
+    @PluginMethod fun getTeacherProfile(call: PluginCall) = launch(call) { resolve(call, cloud.getTeacherProfile()) }
+    @PluginMethod fun saveTeacherProfile(call: PluginCall) = launch(call) {
+        resolve(call, cloud.saveTeacherProfile(required(call, "username"), required(call, "schoolName")))
+    }
+
     @PluginMethod fun registerDevice(call: PluginCall) = launch(call) {
         val schoolId = required(call, "schoolId")
         val displayName = required(call, "displayName")
@@ -330,9 +335,11 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         val subscription = preferences.selectedSubscriptionId ?: error("Select a designated SMS SIM first.")
         require(ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) { "SMS permission has not been granted." }
         val now = System.currentTimeMillis(); val id = UUID.randomUUID().toString()
+        val owner = requireNotNull(cloud.currentUser()?.uid) { "Sign in first." }
+        val renderedMessage = preferences.teacherSmsProfile(owner)?.message(message) ?: message
         database.smsOutbox().insert(SmsOutboxEntity(
-            messageId = id, idempotencyKey = "TEST|$id", attendanceEventUuid = UUID.randomUUID().toString(), guardianId = "TEST", ownerUid = requireNotNull(cloud.currentUser()?.uid),
-            encryptedPhone = crypto.encrypt(phone), renderedMessage = message, subscriptionId = subscription, cloudDirty = false,
+            messageId = id, idempotencyKey = "TEST|$id", attendanceEventUuid = UUID.randomUUID().toString(), guardianId = "TEST", ownerUid = owner,
+            encryptedPhone = crypto.encrypt(phone), renderedMessage = renderedMessage, subscriptionId = subscription, cloudDirty = false,
             createdAtEpochMs = now, updatedAtEpochMs = now,
         ))
         QueueScheduler.scheduleSms(context)

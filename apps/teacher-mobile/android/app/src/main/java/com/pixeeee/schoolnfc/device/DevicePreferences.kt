@@ -3,6 +3,8 @@ package com.pixeeee.schoolnfc.device
 
 import android.content.Context
 import java.util.UUID
+import com.pixeeee.schoolnfc.attendance.TeacherSmsProfile
+import org.json.JSONObject
 
 class DevicePreferences(context: Context) {
     private val prefs = context.getSharedPreferences("school_nfc_device", Context.MODE_PRIVATE)
@@ -21,6 +23,16 @@ class DevicePreferences(context: Context) {
     var authorizationUserId: String? get() = prefs.getString("authorization_user", null); set(v) { prefs.edit().putString("authorization_user", v).apply() }
     var authorizationBackend: String? get() = prefs.getString("authorization_backend", null); set(v) { prefs.edit().putString("authorization_backend", v).apply() }
     var snapshotOwner: String? get() = prefs.getString("snapshot_owner", null); set(v) { prefs.edit().putString("snapshot_owner", v).apply() }
+    private fun profileKey(uid: String, school: String?) = "sms_profile|$backend|$school|$uid"
+    fun teacherSmsProfile(uid: String, school: String? = schoolId): TeacherSmsProfile? = runCatching {
+        prefs.getString(profileKey(uid, school), null)?.let {
+            val value = JSONObject(it)
+            TeacherSmsProfile.validated(value.getString("username"), value.getString("schoolName"))
+        }
+    }.getOrNull()
+    fun cacheTeacherSmsProfile(uid: String, profile: TeacherSmsProfile, school: String? = schoolId) {
+        prefs.edit().putString(profileKey(uid, school), JSONObject().put("username", profile.username).put("schoolName", profile.schoolName).toString()).apply()
+    }
     fun leaseValid(nowMs: Long = System.currentTimeMillis()): Boolean = try { authorizationBackend == backend && authorizationUserId != null && authorizationUserId == com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid && leaseId != null && leaseExpiresAt?.let { java.time.Instant.parse(it).toEpochMilli() > nowMs } == true } catch (_: Exception) { false }
     fun cachedRosterValid(): Boolean = leaseValid() && snapshotOwner == "$backend|$schoolId|$authorizationUserId"
     fun clearAuthorization() { prefs.edit().remove("lease_id").remove("lease_expires_at").remove("allowed_sections").remove("authorization_user").remove("authorization_backend").putString("device_status", "UNREGISTERED").apply() }

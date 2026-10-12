@@ -67,6 +67,17 @@ service cloud.firestore {
       match /invitations/{invitationId} {
         allow read, write: if false;
       }
+      match /teacherSmsProfiles/{uid} {
+        function identity(value, max) {
+          return value is string && value.size() > 0 && value.size() <= max
+            && value.matches('.*\\S.*') && value.matches('^[^\\x00-\\x1F\\x7F-\\x9F]+$');
+        }
+        allow get: if activeMember(schoolId) && member(schoolId).role in ['TEACHER', 'SCHOOL_ADMIN'] && uid == request.auth.uid;
+        allow create, update: if activeMember(schoolId) && member(schoolId).role in ['TEACHER', 'SCHOOL_ADMIN'] && uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['username', 'schoolName', 'updatedAt'])
+          && identity(request.resource.data.username, 60) && identity(request.resource.data.schoolName, 100)
+          && request.resource.data.updatedAt == request.time;
+      }
 
       match /academicYears/{documentId} {
         allow read: if activeMember(schoolId);

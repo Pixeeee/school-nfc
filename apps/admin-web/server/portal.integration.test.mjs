@@ -252,14 +252,12 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
       await db
         .doc(`${base}/gradeLevels/initial`)
         .set({ name: "All grades", active: true });
-      await db
-        .doc(`${base}/sparkSections/${legacyId}`)
-        .set({
-          name: "Legacy Nara",
-          gradeLevelId: "initial",
-          teacherId: "teacherA",
-          active: true,
-        });
+      await db.doc(`${base}/sparkSections/${legacyId}`).set({
+        name: "Legacy Nara",
+        gradeLevelId: "initial",
+        teacherId: "teacherA",
+        active: true,
+      });
       const legacyRequest = {
         ...student,
         sectionId: legacyId,

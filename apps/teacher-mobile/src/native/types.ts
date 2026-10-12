@@ -5,6 +5,10 @@ export interface AuthState {
   uid?: string;
   email?: string;
 }
+export interface TeacherSmsProfile {
+  username: string;
+  schoolName: string;
+}
 export interface DeviceState {
   backend?: "SPARK" | "FUNCTIONS";
   deviceId: string;
@@ -88,6 +92,8 @@ export interface SubjectConfiguration {
   endTime: string;
 }
 export interface SchoolNfcPlugin {
+  getTeacherProfile(): Promise<TeacherSmsProfile>;
+  saveTeacherProfile(profile: TeacherSmsProfile): Promise<TeacherSmsProfile>;
   activeTeacherDirectory(): Promise<{ teachers: ActiveTeacher[] }>;
   sectionAssign(options: {
     sectionId: string;

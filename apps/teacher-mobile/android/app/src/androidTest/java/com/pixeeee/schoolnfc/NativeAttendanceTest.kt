@@ -86,6 +86,7 @@ class NativeAttendanceTest {
         prefs.schoolId = "test_school"; prefs.deviceStatus = "APPROVED"; prefs.leaseId = "test_lease"
         prefs.leaseExpiresAt = Instant.now().plusSeconds(3600).toString(); prefs.allowedSectionIds = setOf("section_a")
         prefs.snapshotOwner = "${prefs.backend}|${prefs.schoolId}|${prefs.authorizationUserId}"
+        prefs.cacheTeacherSmsProfile(auth.currentUser!!.uid, com.pixeeee.schoolnfc.attendance.TeacherSmsProfile.validated("sir_jade", "Nara \$School"))
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {
             database.sections().upsert(listOf(SectionEntity("section_a", "A", auth.currentUser!!.uid)))
@@ -123,6 +124,7 @@ class NativeAttendanceTest {
             assertEquals("ABSENT", database.attendance().byUuid(requireNotNull(absent.eventUuid))?.status)
             assertEquals("DUPLICATE", repository.markAbsent("test_school", "student_a", "section_a").status)
             val messages = database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend)
+            assertTrue(messages.all { it.renderedMessage.contains("Nara \$School") && it.renderedMessage.endsWith("Teacher: sir_jade.") })
             assertTrue(messages.any { it.renderedMessage.contains("is absent") && CryptoManager().decrypt(it.encryptedPhone) == "+639171234567" })
             assertEquals("ACCEPTED", repository.markPresent("test_school", "student_a", "section_a").status)
             assertEquals(4, database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend).size)

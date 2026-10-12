@@ -33,6 +33,16 @@ service cloud.firestore {
     match /schools/{school} {
       allow get: if active(school);
       match /members/{uid} { allow get: if active(school) && uid == request.auth.uid; }
+      match /teacherSmsProfiles/{uid} {
+        function identity(value, max) {
+          return text(value, max) && value.matches('.*\\S.*') && value.matches('^[^\\x00-\\x1F\\x7F-\\x9F]+$');
+        }
+        allow get: if teacher(school) && uid == request.auth.uid;
+        allow create, update: if teacher(school) && uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['username', 'schoolName', 'updatedAt'])
+          && identity(request.resource.data.username, 60) && identity(request.resource.data.schoolName, 100)
+          && request.resource.data.updatedAt == request.time;
+      }
       match /academicYears/{id} { allow read: if active(school); }
       match /gradeLevels/{id} { allow read: if active(school); }
       match /smsTemplates/{id} { allow read: if active(school); }

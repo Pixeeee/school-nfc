@@ -12,6 +12,16 @@ import type {
 } from "./types";
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
+  async getTeacherProfile(): Promise<import("./types").TeacherSmsProfile> {
+    throw new Error(
+      "Teacher profiles require the Android app and a school account.",
+    );
+  }
+  async saveTeacherProfile(): Promise<import("./types").TeacherSmsProfile> {
+    throw new Error(
+      "Teacher profiles require the Android app and a school account.",
+    );
+  }
   async activeTeacherDirectory(): Promise<{
     teachers: import("./types").ActiveTeacher[];
   }> {

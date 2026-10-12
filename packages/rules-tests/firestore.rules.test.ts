@@ -7,7 +7,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 let env: RulesTestEnvironment;
 const projectId = "school-nfc-rules-test";
@@ -62,6 +62,33 @@ async function seed() {
 }
 
 describe("Firestore tenant and write boundaries", () => {
+  it("keeps teacher SMS preferences private and prevents privilege fields", async () => {
+    await seed();
+    const own = env.authenticatedContext("teacher").firestore();
+    const profile = {
+      username: "sir_jade",
+      schoolName: "Nara School",
+      updatedAt: serverTimestamp(),
+    };
+    await assertSucceeds(
+      setDoc(doc(own, "schools/schoolA/teacherSmsProfiles/teacher"), profile),
+    );
+    await assertSucceeds(
+      getDoc(doc(own, "schools/schoolA/teacherSmsProfiles/teacher")),
+    );
+    await assertFails(
+      setDoc(doc(own, "schools/schoolA/teacherSmsProfiles/admin"), profile),
+    );
+    await assertFails(
+      setDoc(doc(own, "schools/schoolB/teacherSmsProfiles/teacher"), profile),
+    );
+    await assertFails(
+      setDoc(doc(own, "schools/schoolA/teacherSmsProfiles/teacher"), {
+        ...profile,
+        role: "SCHOOL_ADMIN",
+      }),
+    );
+  });
   it("denies unauthenticated school reads", async () => {
     await seed();
     await assertFails(

@@ -28,11 +28,9 @@ export default async function portal(req, res) {
       });
     } catch {
       res.setHeader("Cache-Control", "no-store");
-      return res
-        .status(503)
-        .json({
-          error: "School administrator setup is required before signing in.",
-        });
+      return res.status(503).json({
+        error: "School administrator setup is required before signing in.",
+      });
     }
   }
   return handler(req, res);

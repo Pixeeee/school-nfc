@@ -146,6 +146,8 @@ class AttendanceRepository(
         val zone = ZoneId.of(preferences.schoolTimeZone)
         val localDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString()
         val eventUuid = UUID.randomUUID().toString()
+        val owner = requireNotNull(FirebaseAuth.getInstance().currentUser?.uid) { "Sign in first." }
+        val profile = preferences.teacherSmsProfile(owner, session.schoolId)
         val key = if (subjectId.isNotEmpty()) "${session.schoolId}|${student.id}|$localDate|$subjectId|ROLLCALL|$eventUuid" else if (source == "MANUAL" && session.mode != "DISMISSAL" && preferences.backend == "SPARK") "${session.schoolId}|${student.id}|$localDate|ROLLCALL|$eventUuid" else AttendancePolicy.key(session.schoolId, student.id, localDate, session.mode)
         val existing = database.attendance().byIdempotencyKey(key)
         if (existing != null) return ScanOutcome("DUPLICATE", timestamp, existing.eventUuid, student.id, student.displayName, student.studentNumber, session.mode, "Attendance was already recorded for this mode today.", existing.smsExpectedCount, student.photoPath)
@@ -164,7 +166,7 @@ class AttendanceRepository(
             eventUuid = eventUuid, idempotencyKey = key, schoolId = session.schoolId, studentId = student.id, cardId = cardId, source = source, backend = preferences.backend,
             subjectId = subjectId, attendanceTag = attendanceTag, eventType = session.mode, status = status, localSchoolDate = localDate, localTimestamp = timestamp,
             elapsedRealtimeMs = SystemClock.elapsedRealtime(), timezone = zone.id, clockTrust = "UNKNOWN",
-            deviceId = preferences.deviceId, teacherId = FirebaseAuth.getInstance().currentUser!!.uid,
+            deviceId = preferences.deviceId, teacherId = owner,
             scannerSessionId = session.id, smsExpectedCount = eligibleRoutes.size, createdAtEpochMs = now,
         )
 
@@ -173,17 +175,18 @@ class AttendanceRepository(
             if (template != null) {
                 for (route in eligibleRoutes) {
                     val messageId = UUID.randomUUID().toString()
-                    val message = render(template.body, mapOf(
-                        "schoolName" to (preferences.schoolName ?: "School"),
+                    val body = render(template.body, mapOf(
+                        "schoolName" to (profile?.schoolName ?: preferences.schoolName ?: "School"),
                         "studentName" to student.displayName,
                         "eventTime" to DateTimeFormatter.ofPattern("h:mm a").withZone(zone).format(Instant.ofEpochMilli(now)),
                         "eventDate" to DateTimeFormatter.ofPattern("MMMM d, uuuu").withZone(zone).format(Instant.ofEpochMilli(now)),
                         "eventType" to session.mode.lowercase().replaceFirstChar { it.uppercase() },
                         "shortReference" to eventUuid.take(8).uppercase(),
                     ))
+                    val message = profile?.message(body) ?: body
                     database.smsOutbox().insert(SmsOutboxEntity(
                         messageId = messageId, idempotencyKey = "$eventUuid|${route.guardianId}|${template.id}", attendanceEventUuid = eventUuid,
-                        guardianId = route.guardianId, ownerUid = requireNotNull(FirebaseAuth.getInstance().currentUser?.uid), encryptedPhone = route.encryptedPhone, renderedMessage = message,
+                        guardianId = route.guardianId, ownerUid = owner, encryptedPhone = route.encryptedPhone, renderedMessage = message,
                         subscriptionId = preferences.selectedSubscriptionId, createdAtEpochMs = now, updatedAtEpochMs = now,
                     ))
                 }
@@ -198,9 +201,7 @@ class AttendanceRepository(
     }
 
     private fun render(template: String, values: Map<String, String>): String {
-        var result = template
-        for ((key, value) in values) result = result.replace(Regex("\\{\\{\\s*$key\\s*\\}\\}"), value)
-        return result.trim()
+        return Regex("\\{\\{\\s*(\\w+)\\s*\\}\\}").replace(template) { match -> values[match.groupValues[1]] ?: match.value }.trim()
     }
 
     private fun rejected(timestamp: String, reason: String) = ScanOutcome("REJECTED", timestamp, reason = reason)

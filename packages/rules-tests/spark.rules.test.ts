@@ -151,6 +151,62 @@ async function ready() {
 }
 
 describe("Spark client trust boundaries", () => {
+  it("allows only the active teacher's own bounded SMS profile", async () => {
+    await seed();
+    const db = dbFor();
+    const profile = {
+      username: "sir_jade",
+      schoolName: "Nara School",
+      updatedAt: serverTimestamp(),
+    };
+    await assertSucceeds(getDoc(ref(db, "teacherSmsProfiles/teacherA")));
+    await assertSucceeds(
+      setDoc(ref(db, "teacherSmsProfiles/teacherA"), profile),
+    );
+    await assertSucceeds(
+      updateDoc(ref(db, "teacherSmsProfiles/teacherA"), {
+        schoolName: "Acacia School",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      getDoc(ref(dbFor("teacherB"), "teacherSmsProfiles/teacherA")),
+    );
+    await assertFails(
+      setDoc(ref(dbFor("teacherB"), "teacherSmsProfiles/teacherA"), profile),
+    );
+    await assertFails(setDoc(ref(db, "teacherSmsProfiles/teacherB"), profile));
+    await assertFails(getDocs(collection(db, `${base}/teacherSmsProfiles`)));
+    await assertFails(
+      setDoc(ref(db, "teacherSmsProfiles/teacherA"), {
+        ...profile,
+        role: "SCHOOL_ADMIN",
+      }),
+    );
+    for (const changes of [
+      { username: " " },
+      { username: "x".repeat(61) },
+      { schoolName: "x".repeat(101) },
+      { username: "teacher\nAdmin" },
+      { schoolName: "School\u0000" },
+      { updatedAt: Timestamp.fromMillis(1) },
+    ]) {
+      await assertFails(
+        setDoc(ref(db, "teacherSmsProfiles/teacherA"), {
+          ...profile,
+          ...changes,
+        }),
+      );
+    }
+    await env.withSecurityRulesDisabled(async (context) =>
+      setDoc(ref(context.firestore(), "members/teacherA"), {
+        status: "SUSPENDED",
+        role: "TEACHER",
+      }),
+    );
+    await assertFails(setDoc(ref(db, "teacherSmsProfiles/teacherA"), profile));
+    await assertFails(getDoc(ref(db, "teacherSmsProfiles/teacherA")));
+  });
   it("keeps administrator Firebase reads available while denying class and attendance mutations", async () => {
     await ready();
     const admin = dbFor("admin");

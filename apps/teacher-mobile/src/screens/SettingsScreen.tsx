@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LogOut, Radio, Send, ShieldCheck } from "lucide-react";
+import { LogOut, Radio, Send, ShieldCheck, UserRound } from "lucide-react";
 import { SchoolNfc } from "../native/plugin";
 import type { DeviceState, SubscriptionInfo } from "../native/types";
 import { Banner, Button, Field } from "../components/Ui";
@@ -20,6 +20,56 @@ export function SettingsScreen({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [username, setUsername] = useState("");
+  const [schoolName, setSchoolName] = useState("");
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileBusy, setProfileBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void SchoolNfc.getTeacherProfile()
+      .then((profile) => {
+        if (!cancelled) {
+          setUsername(profile.username);
+          setSchoolName(profile.schoolName);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setError(
+            e instanceof Error ? e.message : "Profile could not be loaded.",
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  async function saveProfile() {
+    setProfileBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const profile = await SchoolNfc.saveTeacherProfile({
+        username: username.trim(),
+        schoolName: schoolName.trim(),
+      });
+      setUsername(profile.username);
+      setSchoolName(profile.schoolName);
+      setMessage(
+        "Teacher profile saved. New parent texts will include your username and school.",
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Profile could not be saved. Check your connection.",
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  }
   useEffect(() => {
     if (permission)
       void SchoolNfc.listSubscriptions()
@@ -72,6 +122,59 @@ export function SettingsScreen({
       <h1>Settings</h1>
       {message && <Banner kind="info">{message}</Banner>}
       {error && <Banner>{error}</Banner>}
+      <section className="settings-card">
+        <div className="settings-icon">
+          <UserRound />
+        </div>
+        <div>
+          <h2>Teacher profile</h2>
+          <p>
+            Your username and school are included in new attendance, subject and
+            Out texts. This sets your SMS sender details.
+          </p>
+          {profileLoading && <p role="status">Loading teacher profile…</p>}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveProfile();
+            }}
+          >
+            <Field label="Username in texts">
+              <input
+                name="smsUsername"
+                required
+                maxLength={60}
+                value={username}
+                disabled={profileLoading || profileBusy}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </Field>
+            <Field label="School">
+              <input
+                name="smsSchool"
+                required
+                maxLength={100}
+                value={schoolName}
+                disabled={profileLoading || profileBusy}
+                onChange={(e) => setSchoolName(e.target.value)}
+              />
+            </Field>
+            <Button
+              type="submit"
+              busy={profileBusy}
+              disabled={
+                profileLoading || !username.trim() || !schoolName.trim()
+              }
+            >
+              Save profile
+            </Button>
+          </form>
+          <p>
+            Save while connected to the internet. Saved details remain available
+            for offline attendance on this phone.
+          </p>
+        </div>
+      </section>
       <section className="settings-card">
         <div className="settings-icon">
           <Radio />

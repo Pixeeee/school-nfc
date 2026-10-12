@@ -4,6 +4,11 @@ package com.pixeeee.schoolnfc.cloud
 import android.os.Build
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.functions.FirebaseFunctions
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.Source
+import com.pixeeee.schoolnfc.attendance.TeacherSmsProfile
 import kotlinx.coroutines.tasks.await
 import com.pixeeee.schoolnfc.BuildConfig
 import com.pixeeee.schoolnfc.database.AttendanceEventEntity
@@ -32,6 +37,45 @@ class CloudGateway(private val preferences: DevicePreferences) {
 
     fun signOut() { auth.signOut(); preferences.clearAuthorization() }
     fun currentUser() = auth.currentUser
+
+    suspend fun getTeacherProfile(): Map<String, Any?> {
+        val owner = requireNotNull(auth.currentUser) { "Sign in first." }
+        val schoolId = requireNotNull(preferences.schoolId) { "Sign in to your school first." }
+        val root = FirebaseFirestore.getInstance().collection("schools").document(schoolId)
+        val profile = try {
+            val saved = root.collection("teacherSmsProfiles").document(owner.uid).get(Source.SERVER).await()
+            if (saved.exists()) TeacherSmsProfile.validated(saved.getString("username").orEmpty(), saved.getString("schoolName").orEmpty())
+            else {
+                val member = root.collection("members").document(owner.uid).get(Source.SERVER).await()
+                val school = root.get(Source.SERVER).await()
+                TeacherSmsProfile.validated(member.getString("username") ?: owner.email?.substringBefore('@') ?: "Teacher", school.getString("name") ?: "School")
+            }
+        } catch (error: FirebaseFirestoreException) {
+            if (error.code !in setOf(FirebaseFirestoreException.Code.UNAVAILABLE, FirebaseFirestoreException.Code.DEADLINE_EXCEEDED)) throw error
+            preferences.teacherSmsProfile(owner.uid, schoolId) ?: throw error
+        }
+        require(auth.currentUser?.uid == owner.uid && preferences.schoolId == schoolId) { "The signed-in teacher changed. Open Settings again." }
+        preferences.cacheTeacherSmsProfile(owner.uid, profile, schoolId)
+        return mapOf("username" to profile.username, "schoolName" to profile.schoolName)
+    }
+
+    suspend fun saveTeacherProfile(username: String, schoolName: String): Map<String, Any?> {
+        val owner = requireNotNull(auth.currentUser?.uid) { "Sign in first." }
+        val schoolId = requireNotNull(preferences.schoolId) { "Sign in to your school first." }
+        val profile = TeacherSmsProfile.validated(username, schoolName)
+        val db = FirebaseFirestore.getInstance()
+        val ref = db.collection("schools").document(schoolId).collection("teacherSmsProfiles").document(owner)
+        ref.get(Source.SERVER).await()
+        // Transactions fail offline instead of leaving an unconfirmed profile write queued.
+        db.runTransaction { tx ->
+            tx.get(ref)
+            tx.set(ref, mapOf("username" to profile.username, "schoolName" to profile.schoolName, "updatedAt" to FieldValue.serverTimestamp()))
+            true
+        }.await()
+        require(auth.currentUser?.uid == owner && preferences.schoolId == schoolId) { "The signed-in teacher changed. Open Settings again." }
+        preferences.cacheTeacherSmsProfile(owner, profile, schoolId)
+        return mapOf("username" to profile.username, "schoolName" to profile.schoolName)
+    }
 
     @Suppress("UNCHECKED_CAST")
     suspend fun call(name: String, data: Map<String, Any?>): Map<String, Any?> {
