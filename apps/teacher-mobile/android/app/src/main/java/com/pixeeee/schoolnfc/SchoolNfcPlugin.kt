@@ -223,7 +223,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
 
     @PluginMethod fun createStudent(call: PluginCall) = launch(call) {
         val fields = listOf("requestId", "sectionId", "firstName", "lastName", "parentName", "parentPhone").associateWith { required(call, it) }
-        val result = cloud.call("createTeacherStudent", teacherContext() + fields + (call.getString("studentNumber")?.let { mapOf("studentNumber" to it) } ?: emptyMap()) + mapOf(
+        val result = cloud.call("createTeacherStudent", teacherContext() + fields + (call.getInt("grade")?.let { mapOf("grade" to it) } ?: emptyMap()) + (call.getString("studentNumber")?.let { mapOf("studentNumber" to it) } ?: emptyMap()) + mapOf(
             "parentPhoneVerified" to (call.getBoolean("parentPhoneVerified") == true), "parentConsent" to (call.getBoolean("parentConsent") == true),
         ))
         SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()

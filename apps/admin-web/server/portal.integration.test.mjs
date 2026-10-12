@@ -248,6 +248,51 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
       await db
         .doc(`${base}/sparkSections/${sectionId}`)
         .update({ active: true });
+      const legacyId = randomUUID();
+      await db
+        .doc(`${base}/gradeLevels/initial`)
+        .set({ name: "All grades", active: true });
+      await db
+        .doc(`${base}/sparkSections/${legacyId}`)
+        .set({
+          name: "Legacy Nara",
+          gradeLevelId: "initial",
+          teacherId: "teacherA",
+          active: true,
+        });
+      const legacyRequest = {
+        ...student,
+        sectionId: legacyId,
+        requestId: randomUUID(),
+        grade: 10,
+      };
+      expect(
+        (await call("studentCreate", { ...legacyRequest, grade: 13 })).code,
+      ).toBe(400);
+      expect(
+        (await call("studentCreate", legacyRequest, "teacherB")).code,
+      ).toBe(403);
+      const legacyStudent = await call("studentCreate", legacyRequest);
+      expect(legacyStudent.code).toBe(200);
+      expect(legacyStudent.body.studentNumber).toBe("G10-LEGACY-NARA-001");
+      expect(
+        (await db.doc(`${base}/sparkSections/${legacyId}`).get()).data(),
+      ).toMatchObject({ grade: 10, gradeLevelId: "initial" });
+      expect(
+        (await call("studentCreate", legacyRequest)).body.studentNumber,
+      ).toBe(legacyStudent.body.studentNumber);
+      expect(
+        (
+          await call("studentCreate", {
+            ...legacyRequest,
+            requestId: randomUUID(),
+            grade: 11,
+          })
+        ).code,
+      ).toBe(409);
+      expect(
+        (await db.doc(`${base}/sparkSections/${legacyId}`).get()).data().grade,
+      ).toBe(10);
       for (const grade of [1, 12]) {
         const r = await call("sectionCreate", {
           requestId: randomUUID(),

@@ -82,6 +82,7 @@ const schemas = {
       action: z.literal("studentCreate"),
       requestId: z.string().uuid(),
       sectionId: id,
+      grade: z.number().int().min(1).max(12).optional(),
       studentNumber: z
         .string()
         .trim()
@@ -723,6 +724,30 @@ export function createPortalHandler({
                 403,
                 "Only the class roster owner can create students.",
               );
+            let grade = section.data().grade;
+            if (
+              grade === undefined &&
+              section.data().gradeLevelId &&
+              (input.grade !== undefined || !input.studentNumber)
+            ) {
+              const legacyGrade = await tx.get(
+                db.doc(`${base}/gradeLevels/${section.data().gradeLevelId}`),
+              );
+              const match = /^Grade\s+(\d{1,2})$/i.exec(
+                legacyGrade.data()?.name || "",
+              );
+              if (match) grade = Number(match[1]);
+            }
+            if (
+              input.grade !== undefined &&
+              grade !== undefined &&
+              input.grade !== grade
+            )
+              throw new RequestError(
+                409,
+                "The class grade is already set. Refresh the class.",
+              );
+            grade ??= input.grade;
             const existing = await tx.get(ref);
             if (existing.exists) {
               if (
@@ -739,20 +764,10 @@ export function createPortalHandler({
               counter,
               next;
             if (section.data().classKind || !number) {
-              let grade = section.data().grade;
-              if (grade === undefined && section.data().gradeLevelId) {
-                const legacyGrade = await tx.get(
-                  db.doc(`${base}/gradeLevels/${section.data().gradeLevelId}`),
-                );
-                const match = /^Grade\s+(\d{1,2})$/i.exec(
-                  legacyGrade.data()?.name || "",
-                );
-                if (match) grade = Number(match[1]);
-              }
               if (!Number.isInteger(grade) || grade < 1 || grade > 12)
                 throw new RequestError(
                   400,
-                  "This legacy section needs a student number.",
+                  "Choose Grade 1–12 for this legacy class.",
                 );
               const name =
                 section
@@ -777,6 +792,8 @@ export function createPortalHandler({
                 .exists
             )
               throw new RequestError(409, "Student number already exists.");
+            if (input.grade !== undefined && section.data().grade === undefined)
+              tx.update(section.ref, { grade: input.grade });
             if (counter) tx.set(counter, { next });
             tx.create(ref, {
               ...values,
