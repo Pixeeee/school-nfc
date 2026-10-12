@@ -522,9 +522,11 @@ export function RollCallScreen({
       {form === "student" && (
         <StudentForm
           sectionId={selected}
+          grade={section?.grade}
           onCancel={() => setForm(null)}
           onSaved={async (studentNumber) => {
             await refreshRoster();
+            if (section?.grade == null) await loadSetup();
             setForm(null);
             setNotice(
               `Student and parent contact saved.${studentNumber ? ` Student code: ${studentNumber}.` : ""}`,

@@ -11,13 +11,11 @@ const api = vi.hoisted(() => ({
     ],
   }),
   createSection: vi.fn().mockResolvedValue({ sectionId: "new" }),
-  createStudent: vi
-    .fn()
-    .mockResolvedValue({
-      studentId: "student",
-      guardianId: "parent",
-      studentNumber: "G10-NARA-001",
-    }),
+  createStudent: vi.fn().mockResolvedValue({
+    studentId: "student",
+    guardianId: "parent",
+    studentNumber: "G10-NARA-001",
+  }),
   sectionAssign: vi.fn().mockResolvedValue({ adviserId: "teacherB" }),
   subjectSet: vi.fn().mockResolvedValue({ subjectId: "math" }),
 }));
@@ -200,9 +198,15 @@ it("requires subject names and a valid schedule then preserves the request on re
 it("leaves student code generation to the server while keeping parent verification and consent", async () => {
   const onSaved = vi.fn().mockResolvedValue(undefined);
   await renderForm(
-    <StudentForm sectionId="nara" onSaved={onSaved} onCancel={() => {}} />,
+    <StudentForm
+      sectionId="nara"
+      grade={10}
+      onSaved={onSaved}
+      onCancel={() => {}}
+    />,
   );
   expect(container.textContent).not.toContain("Student number");
+  expect(container.textContent).not.toContain("Class grade");
   await input("First name", "Juan");
   await input("Last name", "Santos");
   await input("Parent name", "Maria");
@@ -227,4 +231,35 @@ it("leaves student code generation to the server while keeping parent verificati
     parentConsent: true,
   });
   expect(onSaved).toHaveBeenCalledWith("G10-NARA-001");
+});
+
+it("requires an explicit grade for legacy classes before generating student codes", async () => {
+  await renderForm(
+    <StudentForm
+      sectionId="legacy"
+      onSaved={vi.fn().mockResolvedValue(undefined)}
+      onCancel={() => {}}
+    />,
+  );
+  const grade = container.querySelector("select")!;
+  expect(grade.required).toBe(true);
+  expect(grade.value).toBe("");
+  expect(grade.options).toHaveLength(13);
+  await submit(0);
+  expect(api.createStudent).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Choose the class grade");
+  await select(0, "10");
+  await input("First name", "Juan");
+  await input("Last name", "Santos");
+  await input("Parent name", "Maria");
+  await input("Parent mobile number", "09171234567");
+  await act(async () =>
+    container
+      .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+      .forEach((c) => c.click()),
+  );
+  await submit(0);
+  expect(api.createStudent).toHaveBeenCalledWith(
+    expect.objectContaining({ sectionId: "legacy", grade: 10 }),
+  );
 });

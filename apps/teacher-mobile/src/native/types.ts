@@ -235,6 +235,7 @@ export interface CreateSectionRequest {
   academicYearId?: string;
 }
 export interface CreateTeacherStudentRequest {
+  grade?: number;
   requestId: string;
   sectionId: string;
   studentNumber?: string;

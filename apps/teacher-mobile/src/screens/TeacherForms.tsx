@@ -132,14 +132,17 @@ export function SectionForm({
 
 export function StudentForm({
   sectionId,
+  grade,
   onSaved,
   onCancel,
 }: {
   sectionId: string;
+  grade?: number;
   onSaved: (studentNumber?: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [requestId] = useState(() => crypto.randomUUID());
+  const [classGrade, setClassGrade] = useState("");
   const [fields, setFields] = useState({
     firstName: "",
     lastName: "",
@@ -152,6 +155,10 @@ export function StudentForm({
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (grade == null && !classGrade) {
+      setError("Choose the class grade to generate the student code.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -159,6 +166,7 @@ export function StudentForm({
         ...fields,
         requestId,
         sectionId,
+        ...(grade == null ? { grade: Number(classGrade) } : {}),
         parentPhoneVerified: verified,
         parentConsent: consent,
       });
@@ -193,6 +201,22 @@ export function StudentForm({
       {error && <Banner>{error}</Banner>}
       <form onSubmit={submit}>
         <p>The student code is generated when you save.</p>
+        {grade == null && (
+          <Field label="Class grade">
+            <select
+              required
+              value={classGrade}
+              onChange={(e) => setClassGrade(e.target.value)}
+            >
+              <option value="">Choose a grade</option>
+              {Array.from({ length: 12 }, (_, i) => (
+                <option key={i + 1} value={i + 1}>
+                  Grade {i + 1}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <div className="form-columns">
           {input("firstName", "First name")}
           {input("lastName", "Last name")}
