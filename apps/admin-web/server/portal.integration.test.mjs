@@ -565,4 +565,37 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
       ),
     ).toBe(true);
   });
+  it("preserves student identity when displaying native attendance", async () => {
+    const studentId = randomUUID();
+    expect(
+      (await call("studentCreate", {
+        ...student,
+        requestId: studentId,
+        studentNumber: "native001",
+      })).code,
+    ).toBe(200);
+    await db.doc(`${base}/sparkAttendance/${randomUUID()}`).set({
+      studentId,
+      sectionId: "teacherA",
+      teacherId: "teacherB",
+      eventType: "ARRIVAL",
+      attendanceTag: "ON_TIME",
+      localSchoolDate: schoolDate(),
+      localTimestamp: new Date().toISOString(),
+    });
+    const result = await call(
+      "studentList",
+      { sectionId: "teacherA", date: schoolDate() },
+      "adminA",
+    );
+    expect(result.code).toBe(200);
+    expect(result.body.students.find((s) => s.id === studentId)).toMatchObject({
+      id: studentId,
+      status: "ON_TIME",
+      source: "ANDROID",
+    });
+    expect(
+      result.body.students.find((s) => s.id === studentId),
+    ).not.toHaveProperty("teacherId");
+  });
 });

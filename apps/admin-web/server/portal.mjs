@@ -669,7 +669,8 @@ export function createPortalHandler({
           return res.json({
             students: students.map((s) => ({
               ...s,
-              ...(statuses.get(s.id) || { status: "UNMARKED", source: null }),
+              status: statuses.get(s.id)?.status || "UNMARKED",
+              source: statuses.get(s.id)?.source || null,
             })),
             date: input.date,
             limit: 250,
