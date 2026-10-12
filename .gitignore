@@ -64,3 +64,6 @@ apps/teacher-mobile/android/app/src/main/res/xml/config.xml
 # Expo custom native build configuration is source, not generated output
 !apps/teacher-mobile/.eas/build/
 !apps/teacher-mobile/.eas/build/*.yml
+
+# Kotlin compiler cache
+.kotlin/

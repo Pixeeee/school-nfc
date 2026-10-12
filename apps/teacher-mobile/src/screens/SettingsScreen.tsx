@@ -137,35 +137,37 @@ export function SettingsScreen({
           </Button>
         </div>
       </section>
-      <section className="settings-card">
-        <div className="settings-icon">
-          <ShieldCheck />
-        </div>
-        <div>
-          <h2>Device authorization</h2>
-          <p>
-            Status: <strong>{device.status}</strong>
-            <br />
-            Lease expires:{" "}
-            {device.leaseExpiresAt
-              ? new Date(device.leaseExpiresAt).toLocaleString()
-              : "Not issued"}
-          </p>
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              try {
-                await SchoolNfc.renewLease({ schoolId: device.schoolId! });
-                setMessage("Device authorization renewed.");
-              } catch (e) {
-                setError(e instanceof Error ? e.message : "Renewal failed.");
-              }
-            }}
-          >
-            Renew authorization
-          </Button>
-        </div>
-      </section>
+      {device.backend !== "SPARK" && (
+        <section className="settings-card">
+          <div className="settings-icon">
+            <ShieldCheck />
+          </div>
+          <div>
+            <h2>Device authorization</h2>
+            <p>
+              Status: <strong>{device.status}</strong>
+              <br />
+              Lease expires:{" "}
+              {device.leaseExpiresAt
+                ? new Date(device.leaseExpiresAt).toLocaleString()
+                : "Not issued"}
+            </p>
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  await SchoolNfc.renewLease({ schoolId: device.schoolId! });
+                  setMessage("Device authorization renewed.");
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Renewal failed.");
+                }
+              }}
+            >
+              Renew authorization
+            </Button>
+          </div>
+        </section>
+      )}
       <Button
         variant="danger"
         onClick={async () => {

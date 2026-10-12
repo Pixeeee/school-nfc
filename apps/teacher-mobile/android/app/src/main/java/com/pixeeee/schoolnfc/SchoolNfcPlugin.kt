@@ -78,7 +78,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         scope.launch(Dispatchers.IO) {
             database.smsOutbox().recoverStaleSending(System.currentTimeMillis(), System.currentTimeMillis() - 5 * 60_000)
             QueueScheduler.scheduleSms(context)
-            QueueScheduler.scheduleSync(context)
+            QueueScheduler.scheduleSync(context, true)
         }
     }
 
@@ -97,6 +97,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         require(Regex("^[a-z0-9_]{3,40}$").matches(username) || android.util.Patterns.EMAIL_ADDRESS.matcher(username).matches()) { "Enter the teacher username provided by your administrator." }
         require(password.length >= 8) { "Password must contain at least 8 characters." }
         val result = cloud.signIn(username, password)
+        if (BuildConfig.FIREBASE_SPARK) SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
         resolve(call, result)
     }
 
@@ -119,7 +120,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     @PluginMethod fun renewLease(call: PluginCall) = launch(call) {
         val schoolId = required(call, "schoolId")
         cloud.renewLease(schoolId)
-        QueueScheduler.scheduleSync(context)
+        QueueScheduler.scheduleSync(context, true)
         val state = deviceState()
         notifyListeners("deviceStateChanged", state)
         call.resolve(state)
@@ -150,8 +151,8 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     }
 
     private fun teacherContext(): Map<String, Any?> = mapOf(
-        "schoolId" to requireNotNull(preferences.schoolId) { "Register this phone first." },
-        "deviceId" to preferences.deviceId, "leaseId" to requireNotNull(preferences.leaseId) { "Renew device authorization first." },
+        "schoolId" to requireNotNull(preferences.schoolId) { "Sign in to your school account first." },
+        "deviceId" to preferences.deviceId, "leaseId" to requireNotNull(preferences.leaseId) { "Reconnect to refresh your school session." },
     )
 
     @PluginMethod fun listSections(call: PluginCall) = launch(call) {
@@ -194,7 +195,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         val date = LocalDate.now(ZoneId.of(preferences.schoolTimeZone)).toString()
         val students = database.students().inSection(sectionId).map { student ->
             val key = AttendancePolicy.key(requireNotNull(preferences.schoolId), student.id, date, "ARRIVAL")
-            val event = database.attendance().byIdempotencyKey(key)
+            val event = database.attendance().latestRollCall(requireNotNull(preferences.schoolId), student.id, date, requireNotNull(cloud.currentUser()?.uid), preferences.backend)
             val statuses = event?.let { database.smsOutbox().statusesForEvent(it.eventUuid) } ?: emptyList()
             val smsStatus = when {
                 statuses.isEmpty() -> "NONE"
@@ -204,7 +205,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
                 else -> "QUEUED"
             }
             JSObject().put("id", student.id).put("displayName", student.displayName).put("studentNumber", student.studentNumber)
-                .put("sectionId", student.sectionId).put("present", event != null).put("smsStatus", smsStatus)
+                .put("sectionId", student.sectionId).put("present", event?.status == "PRESENT").put("attendanceStatus", event?.status ?: "UNMARKED").put("smsStatus", smsStatus)
                 .put("syncStatus", event?.syncStatus)
         }
         call.resolve(JSObject().put("students", JSArray(students)).put("localSchoolDate", date))
@@ -212,6 +213,14 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
 
     @PluginMethod fun markPresent(call: PluginCall) = launch(call) {
         val outcome = attendance.markPresent(requireNotNull(preferences.schoolId), required(call, "studentId"), required(call, "sectionId"))
+        onScan(outcome)
+        call.resolve(JSObject().put("status", outcome.status).put("localTimestamp", outcome.localTimestamp)
+            .put("eventUuid", outcome.eventUuid).put("studentId", outcome.studentId).put("displayName", outcome.displayName)
+            .put("eventType", outcome.eventType).put("reason", outcome.reason).put("smsQueued", outcome.smsQueued))
+    }
+
+    @PluginMethod fun markAbsent(call: PluginCall) = launch(call) {
+        val outcome = attendance.markAbsent(requireNotNull(preferences.schoolId), required(call, "studentId"), required(call, "sectionId"))
         onScan(outcome)
         call.resolve(JSObject().put("status", outcome.status).put("localTimestamp", outcome.localTimestamp)
             .put("eventUuid", outcome.eventUuid).put("studentId", outcome.studentId).put("displayName", outcome.displayName)
@@ -287,7 +296,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         call.resolve(JSObject().put("queued", count))
     }
     @PluginMethod fun synchronizeNow(call: PluginCall) = launch(call) {
-        val count = database.syncOutbox().pendingCount(); QueueScheduler.scheduleSync(context); call.resolve(JSObject().put("queued", count))
+        val count = database.syncOutbox().pendingCount(); QueueScheduler.scheduleSync(context, true); call.resolve(JSObject().put("queued", count))
     }
 
     override fun onScan(outcome: ScanOutcome) {
@@ -307,6 +316,13 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     }
 
     private suspend fun deviceState(): JSObject = withContext(Dispatchers.IO) {
+        if (BuildConfig.FIREBASE_SPARK && cloud.currentUser() != null && !preferences.leaseValid()) {
+            preferences.schoolId = preferences.schoolId ?: "schoolattendance"
+            runCatching {
+                cloud.renewLease(requireNotNull(preferences.schoolId))
+                SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
+            }
+        }
         JSObject().put("deviceId", preferences.deviceId).put("status", preferences.deviceStatus).put("schoolId", preferences.schoolId)
             .put("leaseId", preferences.leaseId).put("leaseExpiresAt", preferences.leaseExpiresAt).put("nfcAvailable", nfc.available())
             .put("nfcEnabled", nfc.enabled()).put("smsPermission", ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED)

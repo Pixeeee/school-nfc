@@ -41,12 +41,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
         require(member.getString("status") == "ACTIVE" && member.getString("role") in setOf("TEACHER", "SCHOOL_ADMIN")) { "An active teacher account is required. Ask the school administrator to provision it." }
     }
 
-    private suspend fun approved(schoolId: String) {
-        membership(schoolId)
-        val device = school(schoolId).collection("sparkDevices").document(preferences.deviceId).get(Source.SERVER).await()
-        require(device.getString("assignedUserId") == uid && device.getString("status") == "APPROVED") { "This phone needs administrator approval." }
-        require((device.getTimestamp("leaseExpiresAt")?.toDate()?.time ?: 0) > System.currentTimeMillis()) { "Renew this phone's authorization." }
-    }
+    private suspend fun authorized(schoolId: String) { membership(schoolId) }
 
     private suspend fun sections(schoolId: String): List<Map<String, Any?>> = school(schoolId).collection("sparkSections")
         .whereEqualTo("teacherId", uid).get(Source.SERVER).await().documents
@@ -71,19 +66,12 @@ class SparkGateway(private val preferences: DevicePreferences) {
 
     private suspend fun renew(schoolId: String): Map<String, Any?> {
         membership(schoolId)
-        val ref = school(schoolId).collection("sparkDevices").document(preferences.deviceId)
-        // Leave clock/network margin below the rules' seven-day maximum.
         val expires = Instant.now().plusSeconds(6 * 86400)
-        db.runTransaction { tx ->
-            val device = tx.get(ref)
-            require(device.getString("assignedUserId") == uid && device.getString("status") == "APPROVED") { "Ask the administrator to approve this phone first." }
-            tx.update(ref, "leaseExpiresAt", Timestamp(Date.from(expires)))
-        }.await()
-        return mapOf("leaseId" to ref.id, "expiresAt" to expires.toString(), "sectionIds" to sections(schoolId).map { it["id"] })
+        return mapOf("leaseId" to preferences.deviceId, "expiresAt" to expires.toString(), "sectionIds" to sections(schoolId).map { it["id"] })
     }
 
     private suspend fun setup(schoolId: String): Map<String, Any?> {
-        approved(schoolId)
+        authorized(schoolId)
         val root = school(schoolId)
         fun named(docs: List<com.google.firebase.firestore.DocumentSnapshot>) = docs.filter { it.getBoolean("active") == true }.map { mapOf("id" to it.id, "name" to (it.getString("name") ?: it.id)) }
         return mapOf("sections" to sections(schoolId),
@@ -92,7 +80,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
     }
 
     private suspend fun createSection(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
-        approved(schoolId)
+        authorized(schoolId)
         val id = text(data, "requestId"); java.util.UUID.fromString(id)
         val name = text(data, "name"); require(name.length <= 80)
         val year = text(data, "academicYearId"); val grade = text(data, "gradeLevelId")
@@ -112,7 +100,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
     }
 
     private suspend fun createStudent(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
-        approved(schoolId)
+        authorized(schoolId)
         val id = text(data, "requestId"); java.util.UUID.fromString(id)
         val section = text(data, "sectionId")
         val number = text(data, "studentNumber").uppercase(java.util.Locale.ROOT)
@@ -142,7 +130,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
     }
 
     private suspend fun snapshot(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
-        approved(schoolId)
+        authorized(schoolId)
         val root = school(schoolId); val kind = text(data, "kind")
         val ids = sections(schoolId).map { it["id"].toString() }
         val cursor = data["cursor"]?.toString()?.takeIf { it != "null" }
@@ -175,14 +163,14 @@ class SparkGateway(private val preferences: DevicePreferences) {
 
     @Suppress("UNCHECKED_CAST")
     private suspend fun attendance(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
-        approved(schoolId)
+        authorized(schoolId)
         val root = school(schoolId)
         val events = data["events"] as? List<Map<String, Any?>> ?: error("Events are required.")
         val results = events.map { event ->
             val key = text(event, "idempotencyKey"); val studentId = text(event, "studentId")
             val eventId = text(event, "eventUuid")
             val type = text(event, "eventType"); val date = text(event, "localSchoolDate")
-            require(key == "$schoolId|$studentId|$date|$type") { "Attendance key is invalid." }
+            require(key == "$schoolId|$studentId|$date|$type" || (event["source"] == "MANUAL" && type in setOf("ARRIVAL", "ABSENT") && key == "$schoolId|$studentId|$date|ROLLCALL|$eventId")) { "Attendance key is invalid." }
             require(Instant.parse(text(event, "localTimestamp")).atZone(ZoneId.of(text(event, "timezone"))).toLocalDate().toString() == date)
             val ref = root.collection("sparkAttendance").document(key)
             val outcome = try { db.runTransaction { tx ->
@@ -208,7 +196,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
 
     @Suppress("UNCHECKED_CAST")
     private suspend fun sms(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
-        approved(schoolId)
+        authorized(schoolId)
         val root = school(schoolId)
         val messages = data["results"] as? List<Map<String, Any?>> ?: error("SMS results are required.")
         val results = messages.map { message ->

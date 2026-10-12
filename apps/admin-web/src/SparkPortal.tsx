@@ -469,7 +469,6 @@ export function SparkPortal() {
       icon: BookOpen,
     },
     { id: "attendance" as Tab, label: "Attendance", icon: Activity },
-    { id: "devices" as Tab, label: "Teacher phones", icon: Smartphone },
   ].filter((item) => admin || ["overview", "sections"].includes(item.id));
   return (
     <div className="shell">
@@ -612,7 +611,7 @@ export function SparkPortal() {
                   </h2>
                   <p className="muted">
                     {admin
-                      ? "Create teacher accounts and approve the phones used for prepaid SIM attendance texts."
+                      ? "Create teacher accounts and review their sections, students, and attendance."
                       : "Create a section, add students and parent contacts, then take roll call."}
                   </p>
                   <div className="portal-quick-actions">
@@ -626,9 +625,9 @@ export function SparkPortal() {
                     )}
                     <Button
                       variant="secondary"
-                      onClick={() => setTab(admin ? "devices" : "sections")}
+                      onClick={() => setTab("sections")}
                     >
-                      {admin ? "Teacher phones" : "My sections"}
+                      {admin ? "View class data" : "My sections"}
                     </Button>
                   </div>
                 </Card>

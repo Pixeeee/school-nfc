@@ -272,50 +272,57 @@ describe("Spark client trust boundaries", () => {
     ])
       await assertFails(createStudent(dbFor(), invalid));
   });
-  it("prevents self approval and rejects unapproved, foreign and expired devices", async () => {
+  it("allows class creation without phone registration while preserving ownership", async () => {
     await seed();
     const db = dbFor();
     await assertSucceeds(
-      setDoc(ref(db, "sparkDevices/pending"), {
-        ...device("teacherA"),
-        status: "PENDING",
-        createdAt: serverTimestamp(),
-        leaseExpiresAt: Timestamp.fromMillis(0),
-      }),
-    );
-    await assertFails(
-      updateDoc(ref(db, "sparkDevices/pending"), { status: "APPROVED" }),
-    );
-    await assertFails(
-      updateDoc(ref(dbFor("admin"), "sparkDevices/pending"), {
-        status: "APPROVED",
-      }),
-    );
-    await assertFails(
-      setDoc(ref(db, "sparkSections/pending"), {
+      setDoc(ref(db, "sparkSections/no_phone"), {
         ...section(),
-        deviceId: "pending",
+        deviceId: "never-registered",
       }),
     );
     await assertFails(
-      setDoc(ref(db, "sparkSections/foreign"), {
-        ...section(),
-        deviceId: "teacherB",
+      setDoc(ref(db, "sparkSections/other_owner"), {
+        ...section("teacherB"),
+        deviceId: "never-registered",
       }),
     );
-    await env.withSecurityRulesDisabled((context) =>
-      updateDoc(ref(context.firestore(), "sparkDevices/teacherA"), {
-        leaseExpiresAt: Timestamp.fromMillis(0),
+    await assertFails(
+      setDoc(ref(dbFor("outsider"), "sparkSections/outsider"), {
+        ...section("outsider"),
+        deviceId: "never-registered",
       }),
     );
-    await assertFails(setDoc(ref(db, "sparkSections/expired"), section()));
+  });
+  it("allows immutable manual Absent events without phone registration", async () => {
+    await seed();
+    const db = dbFor();
+    await createStudent(db);
+    const data = {
+      ...attendance(),
+      eventUuid: "absent-event",
+      eventType: "ABSENT",
+      source: "MANUAL",
+      cardId: null,
+      deviceId: "never-registered",
+    };
     await assertSucceeds(
-      updateDoc(ref(db, "sparkDevices/teacherA"), { leaseExpiresAt: future() }),
+      setDoc(
+        ref(
+          db,
+          "sparkAttendance/schoolA|studentA|2026-10-09|ROLLCALL|absent-event",
+        ),
+        data,
+      ),
     );
     await assertFails(
-      updateDoc(ref(db, "sparkDevices/teacherA"), {
-        leaseExpiresAt: Timestamp.fromMillis(Date.now() + 8 * 86400000),
-      }),
+      setDoc(
+        ref(
+          dbFor("teacherB"),
+          "sparkAttendance/schoolA|studentA|2026-10-09|ROLLCALL|intrusion",
+        ),
+        { ...data, eventUuid: "intrusion", teacherId: "teacherB" },
+      ),
     );
   });
   it("denies original collection, guardian PII and metadata writes", async () => {

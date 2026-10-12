@@ -6,6 +6,7 @@ import App from "./App";
 
 const api = vi.hoisted(() => ({
   backend: "FUNCTIONS",
+  status: "APPROVED",
   getAuthState: vi.fn().mockResolvedValue({ signedIn: true }),
   listSections: vi
     .fn()
@@ -28,6 +29,7 @@ const api = vi.hoisted(() => ({
     ],
     localSchoolDate: "2026-10-09",
   }),
+  markAbsent: vi.fn().mockResolvedValue({ status: "ACCEPTED", smsQueued: 1 }),
   markPresent: vi.fn().mockResolvedValue({ status: "ACCEPTED", smsQueued: 1 }),
   stopScannerSession: vi.fn().mockResolvedValue(undefined),
 }));
@@ -36,7 +38,7 @@ vi.mock("./hooks/useNativeState", () => ({
   useNativeState: () => ({
     device: {
       backend: api.backend,
-      status: "APPROVED",
+      status: api.status,
       leaseId: "lease",
       schoolId: "school",
       smsPermission: true,
@@ -56,6 +58,7 @@ afterEach(async () => {
   container?.remove();
   vi.clearAllMocks();
   api.backend = "FUNCTIONS";
+  api.status = "APPROVED";
 });
 async function render() {
   container = document.createElement("div");
@@ -66,6 +69,14 @@ async function render() {
   });
 }
 describe("teacher app layout", () => {
+  it("opens the classroom after Spark sign-in without phone registration", async () => {
+    api.backend = "SPARK";
+    api.status = "UNREGISTERED";
+    await render();
+    expect(container.textContent).toContain("Roll call");
+    expect(container.textContent).toContain("New section");
+    expect(container.textContent).not.toContain("Register phone");
+  });
   it("shows the supported Spark screens without billable card issuance", async () => {
     api.backend = "SPARK";
     await render();
@@ -94,6 +105,21 @@ describe("teacher app layout", () => {
     });
     expect(container.textContent).toContain("1 parent SMS queued");
     expect(container.textContent).not.toContain("SMS delivered");
+  });
+  it("queues a parent message when the teacher marks Absent", async () => {
+    api.backend = "SPARK";
+    await render();
+    const button = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Absent",
+    )!;
+    await act(async () => button.click());
+    expect(api.markAbsent).toHaveBeenCalledWith({
+      sectionId: "section_a",
+      studentId: "juan",
+    });
+    expect(container.textContent).toContain(
+      "marked absent. 1 parent SMS queued",
+    );
   });
   it("reports attendance errors without a success message", async () => {
     api.markPresent.mockRejectedValueOnce(new Error("Authorization expired"));

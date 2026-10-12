@@ -32,6 +32,13 @@ class PortalLoginTest {
             val member = FirebaseFirestore.getInstance().document("schools/schoolattendance/members/${user.uid}").get().await()
             assertEquals("TEACHER", member.getString("role"))
             assertEquals("ACTIVE", member.getString("status"))
+            val setup = cloud.call("getTeacherSetup", mapOf("schoolId" to "schoolattendance"))
+            assertNotNull(setup["academicYears"])
+            val sectionId = java.util.UUID.randomUUID().toString()
+            cloud.call("createTeacherSection", mapOf("schoolId" to "schoolattendance", "requestId" to sectionId, "name" to "Temporary native no-phone class", "academicYearId" to "current", "gradeLevelId" to "initial"))
+            val studentId = java.util.UUID.randomUUID().toString()
+            cloud.call("createTeacherStudent", mapOf("schoolId" to "schoolattendance", "requestId" to studentId, "sectionId" to sectionId, "studentNumber" to "VERIFY_${studentId.take(8).uppercase()}", "firstName" to "Synthetic", "lastName" to "Test Student", "parentName" to "Synthetic Test Parent", "parentPhone" to "09171111111", "parentPhoneVerified" to true, "parentConsent" to true))
+            assertFalse(FirebaseFirestore.getInstance().document("schools/schoolattendance/sparkDevices/${preferences.deviceId}").get().await().exists())
         } finally {
             cloud.signOut()
         }

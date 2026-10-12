@@ -77,7 +77,10 @@ class AttendanceRepository(
         return recordStudent(session, student, card.id, "NFC", now)
     }
 
-    suspend fun markPresent(schoolId: String, studentId: String, sectionId: String): ScanOutcome = recordMutex.withLock {
+    suspend fun markPresent(schoolId: String, studentId: String, sectionId: String): ScanOutcome = markRollCall(schoolId, studentId, sectionId, "ARRIVAL")
+    suspend fun markAbsent(schoolId: String, studentId: String, sectionId: String): ScanOutcome = markRollCall(schoolId, studentId, sectionId, "ABSENT")
+    private suspend fun markRollCall(schoolId: String, studentId: String, sectionId: String, mode: String): ScanOutcome = recordMutex.withLock {
+        require(mode != "ABSENT" || preferences.backend == "SPARK") { "Absent roll call requires the Spark backend." }
         require(preferences.cachedRosterValid()) { "Synchronize this account's roster before taking attendance." }
         require(schoolId == preferences.schoolId) { "This phone belongs to another school." }
         require(preferences.deviceStatus == "APPROVED" && preferences.leaseValid()) { "Renew this phone's authorization before taking attendance." }
@@ -85,30 +88,34 @@ class AttendanceRepository(
         val student = requireNotNull(database.students().byId(studentId)) { "Synchronize this section's students first." }
         require(student.sectionId == sectionId) { "Student is outside this section." }
         AttendancePolicy.manualRejection(student.status, student.sectionId, preferences.allowedSectionIds)?.let { error(it) }
-        val session = ActiveScannerSession(UUID.randomUUID().toString(), schoolId, "ARRIVAL", sectionId, null)
-        database.scannerSessions().insert(ScannerSessionEntity(session.id, schoolId, "ARRIVAL", sectionId, null, uid, System.currentTimeMillis()))
-        recordStudent(session, student, "", "MANUAL", System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val date = Instant.ofEpochMilli(now).atZone(ZoneId.of(preferences.schoolTimeZone)).toLocalDate().toString()
+        val last = database.attendance().latestRollCall(schoolId, studentId, date, uid, preferences.backend)
+        if (last?.eventType == mode) return@withLock ScanOutcome("DUPLICATE", Instant.ofEpochMilli(now).toString(), last.eventUuid, student.id, student.displayName, student.studentNumber, mode, "This attendance status is already recorded.", 0, student.photoPath)
+        val session = ActiveScannerSession(UUID.randomUUID().toString(), schoolId, mode, sectionId, null)
+        database.scannerSessions().insert(ScannerSessionEntity(session.id, schoolId, mode, sectionId, null, uid, now))
+        recordStudent(session, student, "", "MANUAL", maxOf(now, (last?.createdAtEpochMs ?: 0) + 1))
     }
 
     private suspend fun recordStudent(session: ActiveScannerSession, student: StudentEntity, cardId: String, source: String, now: Long): ScanOutcome {
         val timestamp = Instant.ofEpochMilli(now).toString()
         val zone = ZoneId.of(preferences.schoolTimeZone)
         val localDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString()
-        val key = AttendancePolicy.key(session.schoolId, student.id, localDate, session.mode)
+        val eventUuid = UUID.randomUUID().toString()
+        val key = if (source == "MANUAL" && preferences.backend == "SPARK") "${session.schoolId}|${student.id}|$localDate|ROLLCALL|$eventUuid" else AttendancePolicy.key(session.schoolId, student.id, localDate, session.mode)
         val existing = database.attendance().byIdempotencyKey(key)
         if (existing != null) return ScanOutcome("DUPLICATE", timestamp, existing.eventUuid, student.id, student.displayName, student.studentNumber, session.mode, "Attendance was already recorded for this mode today.", existing.smsExpectedCount, student.photoPath)
 
-        val eventUuid = UUID.randomUUID().toString()
         val routes = database.guardianRoutes().activeForStudent(student.id).filter { route -> when (session.mode) {
-            "ARRIVAL" -> route.receiveArrivalSms
+            "ARRIVAL", "ABSENT" -> route.receiveArrivalSms
             "DISMISSAL" -> route.receiveDismissalSms
             else -> route.receiveCustomSms
         } }
         val template = if (source == "MANUAL") com.pixeeee.schoolnfc.database.SmsTemplateEntity(
-            "manual_presence", "ARRIVAL", "Roll call notice", "{{schoolName}}: {{studentName}} is present on {{eventDate}} at {{eventTime}}.", true
+            "manual_${session.mode.lowercase()}", session.mode, "Roll call notice", "{{schoolName}}: {{studentName}} is ${if (session.mode == "ABSENT") "absent" else "present"} on {{eventDate}} at {{eventTime}}.", true
         ) else database.smsTemplates().byEventType(session.mode)
         val eligibleRoutes = if (template?.enabled == true) routes else emptyList()
-        val status = if (session.mode == "DISMISSAL") "DISMISSED" else "PRESENT"
+        val status = when (session.mode) { "ABSENT" -> "ABSENT"; "DISMISSAL" -> "DISMISSED"; else -> "PRESENT" }
         val event = AttendanceEventEntity(
             eventUuid = eventUuid, idempotencyKey = key, schoolId = session.schoolId, studentId = student.id, cardId = cardId, source = source, backend = preferences.backend,
             eventType = session.mode, status = status, localSchoolDate = localDate, localTimestamp = timestamp,

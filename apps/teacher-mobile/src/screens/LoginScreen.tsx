@@ -47,8 +47,8 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
         <h1>Your classroom, ready for roll call.</h1>
         <p>
           Sign in with the teacher username and password provided by your
-          administrator. This phone must also be approved before taking
-          attendance or sending parent texts.
+          administrator. You can create sections and student lists after signing
+          in.
         </p>
         {error && <Banner>{error}</Banner>}
         <form onSubmit={submit}>

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPortalHandler } from "./portal.mjs";
+import { latestNativeRollCall, createPortalHandler } from "./portal.mjs";
 
 function response() {
   return {
@@ -133,4 +133,30 @@ describe("portal trust boundaries", () => {
     expect(r.code).toBe(401);
     expect(r.body.error).toBe("Incorrect username or password.");
   });
+});
+
+it("uses the latest native Present/Absent change for each student", () => {
+  const records = [
+    {
+      studentId: "a",
+      eventType: "ARRIVAL",
+      localTimestamp: "2026-10-12T08:00:00Z",
+    },
+    {
+      studentId: "a",
+      eventType: "ABSENT",
+      localTimestamp: "2026-10-12T08:01:00Z",
+    },
+  ];
+  expect(latestNativeRollCall(records)[0].status).toBe("ABSENT");
+  expect(
+    latestNativeRollCall([
+      ...records,
+      {
+        studentId: "a",
+        eventType: "ARRIVAL",
+        localTimestamp: "2026-10-12T08:02:00Z",
+      },
+    ])[0].status,
+  ).toBe("PRESENT");
 });

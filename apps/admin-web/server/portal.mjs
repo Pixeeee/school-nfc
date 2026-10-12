@@ -98,6 +98,24 @@ const adminActions = new Set([
 ]);
 const rows = (snapshot) =>
   snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+export function latestNativeRollCall(records) {
+  return [
+    ...new Map(
+      [...records]
+        .sort((a, b) =>
+          (a.localTimestamp || "").localeCompare(b.localTimestamp || ""),
+        )
+        .map((x) => [
+          x.studentId,
+          {
+            ...x,
+            status: x.eventType === "ABSENT" ? "ABSENT" : "PRESENT",
+            source: "ANDROID",
+          },
+        ]),
+    ).values(),
+  ];
+}
 export function schoolDate(timeZone = "Asia/Manila", now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -262,12 +280,15 @@ export function createPortalHandler({
                 .collection(`${base}/sparkAttendance`)
                 .where("sectionId", "==", section.id)
                 .where("localSchoolDate", "==", date)
-                .where("eventType", "==", "ARRIVAL")
+                .where("eventType", "in", ["ARRIVAL", "ABSENT"])
                 .limit(1000)
                 .get(),
             );
             const statuses = new Map(
-              arrivals.map((x) => [x.studentId, "PRESENT"]),
+              latestNativeRollCall(arrivals).map((x) => [
+                x.studentId,
+                x.status,
+              ]),
             );
             decisions.forEach((x) => statuses.set(x.studentId, x.status));
             present += [...statuses.values()].filter(
@@ -491,15 +512,12 @@ export function createPortalHandler({
               .collection(`${base}/sparkAttendance`)
               .where("sectionId", "==", input.sectionId)
               .where("localSchoolDate", "==", input.date)
-              .where("eventType", "==", "ARRIVAL")
+              .where("eventType", "in", ["ARRIVAL", "ABSENT"])
               .limit(1000)
               .get(),
           );
           const statuses = new Map(
-            arrivals.map((x) => [
-              x.studentId,
-              { status: "PRESENT", source: "ANDROID" },
-            ]),
+            latestNativeRollCall(arrivals).map((x) => [x.studentId, x]),
           );
           decisions.forEach((x) =>
             statuses.set(x.studentId, { status: x.status, source: "WEB" }),
@@ -581,15 +599,12 @@ export function createPortalHandler({
             await db
               .collection(`${base}/sparkAttendance`)
               .where("localSchoolDate", "==", input.date)
-              .where("eventType", "==", "ARRIVAL")
+              .where("eventType", "in", ["ARRIVAL", "ABSENT"])
               .limit(1000)
               .get(),
           );
           const merged = new Map(
-            native.map((x) => [
-              x.studentId,
-              { ...x, status: "PRESENT", source: "ANDROID" },
-            ]),
+            latestNativeRollCall(native).map((x) => [x.studentId, x]),
           );
           web.forEach((x) => merged.set(x.studentId, x));
           return res.json({

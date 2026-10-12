@@ -26,6 +26,7 @@ class CloudGateway(private val preferences: DevicePreferences) {
             session
         } else auth.signInWithEmailAndPassword(identifier.trim().lowercase(), password).await()
         preferences.clearAuthorization()
+        if (BuildConfig.FIREBASE_SPARK) renewLease(requireNotNull(preferences.schoolId))
         return mapOf("signedIn" to true, "uid" to result.user?.uid, "email" to result.user?.email)
     }
 

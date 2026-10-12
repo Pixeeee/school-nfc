@@ -49,6 +49,12 @@ export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
   }> {
     throw new Error("School attendance requires the Android app.");
   }
+  async markAbsent(_options: {
+    sectionId: string;
+    studentId: string;
+  }): Promise<import("./types").ScanResult> {
+    throw new Error("SIM attendance messages require the Android app.");
+  }
   async markPresent(_options: {
     sectionId: string;
     studentId: string;

@@ -2,7 +2,7 @@
   "expo": {
     "name": "School Attendance",
     "slug": "attendance-check",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "android": {
       "package": "com.example.attendance_check"
     },

@@ -1,5 +1,5 @@
 import type { PluginListenerHandle } from "@capacitor/core";
-export type ScanMode = "ARRIVAL" | "DISMISSAL" | "CUSTOM";
+export type ScanMode = "ARRIVAL" | "ABSENT" | "DISMISSAL" | "CUSTOM";
 export interface AuthState {
   signedIn: boolean;
   uid?: string;
@@ -84,6 +84,10 @@ export interface SchoolNfcPlugin {
   listSectionStudents(options: {
     sectionId: string;
   }): Promise<{ students: RosterStudent[]; localSchoolDate: string }>;
+  markAbsent(options: {
+    sectionId: string;
+    studentId: string;
+  }): Promise<ScanResult>;
   markPresent(options: {
     sectionId: string;
     studentId: string;
@@ -153,6 +157,7 @@ export interface TeacherSetup {
 }
 export interface RosterStudent extends StudentSummary {
   present: boolean;
+  attendanceStatus?: "PRESENT" | "ABSENT" | "UNMARKED";
   smsStatus: "NONE" | "QUEUED" | "SENT" | "DELIVERED" | "FAILED";
   syncStatus?: string;
 }

@@ -53,7 +53,17 @@ export default function App() {
         }}
       />
     );
-  if (!device || device.status !== "APPROVED" || !device.leaseId)
+  if (!device)
+    return (
+      <div className="splash">
+        <ClipboardCheck />
+        <strong>Opening your classroom</strong>
+      </div>
+    );
+  if (
+    device.backend !== "SPARK" &&
+    (device.status !== "APPROVED" || !device.leaseId)
+  )
     return (
       <DeviceScreen
         device={device}

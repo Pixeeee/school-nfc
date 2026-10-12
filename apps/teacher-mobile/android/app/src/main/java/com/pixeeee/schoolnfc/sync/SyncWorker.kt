@@ -18,7 +18,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         if (cloud.currentUser() == null || !preferences.leaseValid()) return Result.failure()
         return try {
             uploadAttendance()
-            SnapshotSynchronizer(database, cloud, preferences, CryptoManager()).refreshAll()
+            if (inputData.getBoolean("refreshRoster", false)) SnapshotSynchronizer(database, cloud, preferences, CryptoManager()).refreshAll()
             uploadSms()
             Result.success()
         } catch (error: Exception) {

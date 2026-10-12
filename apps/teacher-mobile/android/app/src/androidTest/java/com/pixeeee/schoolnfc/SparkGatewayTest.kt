@@ -37,9 +37,6 @@ class SparkGatewayTest {
         val preferences = DevicePreferences(context); preferences.clearAuthorization()
         val cloud = CloudGateway(preferences)
         val school = "spark_native"
-        assertEquals("PENDING", cloud.registerDevice(school, "Emulator teacher phone")["status"])
-        try { cloud.renewLease(school); fail("Pending phone must not renew.") } catch (_: IllegalArgumentException) { }
-        approveOnlyInEmulator(preferences.deviceId)
         cloud.renewLease(school)
         val base = mapOf("schoolId" to school, "deviceId" to preferences.deviceId, "leaseId" to preferences.leaseId)
         val section = UUID.randomUUID().toString()
@@ -79,17 +76,4 @@ class SparkGatewayTest {
         } finally { db.close(); auth.signOut(); preferences.clearAuthorization() }
     }
 
-    private fun approveOnlyInEmulator(deviceId: String) {
-        // Emulator admin endpoint is deliberately inaccessible to production code.
-        val connection = URL("http://10.0.2.2:8080/v1/projects/demo-school-nfc/databases/(default)/documents:commit").openConnection() as java.net.HttpURLConnection
-        connection.requestMethod = "POST"; connection.doOutput = true
-        connection.setRequestProperty("Authorization", "Bearer owner")
-        connection.setRequestProperty("Content-Type", "application/json")
-        val fields = JSONObject().put("status", JSONObject().put("stringValue", "APPROVED"))
-            .put("leaseExpiresAt", JSONObject().put("timestampValue", Instant.now().plusSeconds(86400).toString()))
-        val update = JSONObject().put("name", "projects/demo-school-nfc/databases/(default)/documents/schools/spark_native/sparkDevices/$deviceId").put("fields", fields)
-        val write = JSONObject().put("update", update).put("updateMask", JSONObject().put("fieldPaths", org.json.JSONArray(listOf("status", "leaseExpiresAt"))))
-        connection.outputStream.use { it.write(JSONObject().put("writes", org.json.JSONArray(listOf(write))).toString().toByteArray()) }
-        assertEquals(200, connection.responseCode); connection.disconnect()
-    }
 }

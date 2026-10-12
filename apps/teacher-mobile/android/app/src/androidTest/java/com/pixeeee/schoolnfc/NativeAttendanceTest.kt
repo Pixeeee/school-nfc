@@ -110,6 +110,15 @@ class NativeAttendanceTest {
             prefs.authorizationUserId = "other_user"
             assertFalse(prefs.leaseValid())
             prefs.authorizationUserId = uid
+            val absent = repository.markAbsent("test_school", "student_a", "section_a")
+            assertEquals("ACCEPTED", absent.status)
+            assertEquals(1, absent.smsQueued)
+            assertEquals("ABSENT", database.attendance().byUuid(requireNotNull(absent.eventUuid))?.status)
+            assertEquals("DUPLICATE", repository.markAbsent("test_school", "student_a", "section_a").status)
+            val messages = database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend)
+            assertTrue(messages.any { it.renderedMessage.contains("is absent") && CryptoManager().decrypt(it.encryptedPhone) == "+639171234567" })
+            assertEquals("ACCEPTED", repository.markPresent("test_school", "student_a", "section_a").status)
+            assertEquals(3, database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend).size)
             val now = System.currentTimeMillis()
             database.smsOutbox().insert(SmsOutboxEntity(messageId = "test_message", idempotencyKey = "TEST|test_message", attendanceEventUuid = "not_an_event", guardianId = "TEST", encryptedPhone = "not_used", renderedMessage = "Test", subscriptionId = null, cloudDirty = false, createdAtEpochMs = now, updatedAtEpochMs = now))
             database.smsOutbox().markPartSent("test_message", Instant.now().toString(), now)

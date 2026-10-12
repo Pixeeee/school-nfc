@@ -127,13 +127,15 @@ export function RollCallScreen({
       clearInterval(timer);
     };
   }, [selected]);
-  async function markPresent(student: RosterStudent) {
+  async function markPresent(student: RosterStudent, absent = false) {
     if (busyStudent) return;
     setBusyStudent(student.id);
     setError("");
     setNotice("");
     try {
-      const result = await SchoolNfc.markPresent({
+      const result = await (
+        absent ? SchoolNfc.markAbsent : SchoolNfc.markPresent
+      )({
         sectionId: selected,
         studentId: student.id,
       });
@@ -142,7 +144,7 @@ export function RollCallScreen({
       setNotice(
         result.status === "DUPLICATE"
           ? "Attendance already recorded today. No additional SMS queued."
-          : `${student.displayName} marked present. ${result.smsQueued ?? 0} parent SMS queued.`,
+          : `${student.displayName} marked ${absent ? "absent" : "present"}. ${result.smsQueued ?? 0} parent SMS queued.`,
       );
       await refreshRoster();
     } catch (e) {
@@ -161,7 +163,9 @@ export function RollCallScreen({
         <div>
           <span className="eyebrow">TEACHER ATTENDANCE</span>
           <h1>Roll call</h1>
-          <p>Call a name. Mark present. Keep parents informed.</p>
+          <p>
+            Mark Present or Absent. The saved parent number receives an SMS.
+          </p>
         </div>
         <div className="heading-icon">
           <ClipboardCheck />
@@ -327,6 +331,21 @@ export function RollCallScreen({
                   {student.present && <Check />}
                   {student.present ? "Present ✓" : "Present"}
                 </Button>
+                {device.backend === "SPARK" && (
+                  <Button
+                    variant="secondary"
+                    disabled={
+                      student.attendanceStatus === "ABSENT" ||
+                      busyStudent !== null ||
+                      form !== null
+                    }
+                    onClick={() => void markPresent(student, true)}
+                  >
+                    {student.attendanceStatus === "ABSENT"
+                      ? "Absent ✓"
+                      : "Absent"}
+                  </Button>
+                )}
               </article>
             ))}
           </div>
