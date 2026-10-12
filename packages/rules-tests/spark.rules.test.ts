@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   assertFails,
   assertSucceeds,
@@ -151,6 +151,74 @@ async function ready() {
 }
 
 describe("Spark client trust boundaries", () => {
+  it("keeps administrator Firebase reads available while denying class and attendance mutations", async () => {
+    await ready();
+    const admin = dbFor("admin");
+    await assertSucceeds(getDoc(ref(admin, "sparkStudents/studentA")));
+    await assertSucceeds(
+      getDoc(ref(admin, `sparkAttendance/${attendanceKey}`)),
+    );
+    await assertFails(
+      setDoc(ref(admin, "sparkSections/adminSection"), section("admin")),
+    );
+    const adminStudent = writeBatch(admin);
+    adminStudent.set(
+      ref(admin, "sparkStudents/adminStudent"),
+      student({
+        studentNumber: "ADMIN1",
+        createdBy: "admin",
+        deviceId: "admin",
+      }),
+    );
+    adminStudent.set(ref(admin, "sparkStudentNumbers/ADMIN1"), {
+      studentId: "adminStudent",
+      sectionId: "sectionA",
+    });
+    await assertFails(adminStudent.commit());
+    await assertFails(
+      setDoc(
+        ref(
+          admin,
+          "sparkAttendance/schoolA|studentA|2026-10-09|ROLLCALL|admin1",
+        ),
+        attendance({
+          eventUuid: "admin1",
+          teacherId: "admin",
+          deviceId: "admin",
+        }),
+      ),
+    );
+    await env.withSecurityRulesDisabled(async (context) =>
+      setDoc(ref(context.firestore(), "sparkSubjects/adminSubject"), {
+        sectionId: "sectionA",
+        teacherId: "admin",
+        active: true,
+        name: "Math",
+        startTime: "08:00",
+        endTime: "09:00",
+      }),
+    );
+    await assertFails(
+      updateDoc(ref(admin, "sparkSubjects/adminSubject"), { name: "Changed" }),
+    );
+    await assertFails(
+      setDoc(ref(admin, "sparkDismissals/sectionA_2026-10-09"), {
+        sectionId: "sectionA",
+        teacherId: "admin",
+        deviceId: "admin",
+        localSchoolDate: "2026-10-09",
+        localTimestamp: "2026-10-09T08:00:00+08:00",
+        createdAt: serverTimestamp(),
+        studentIds: ["studentA"],
+      }),
+    );
+    await assertFails(
+      setDoc(
+        ref(admin, "sparkSms/adminMessage"),
+        sms({ teacherId: "admin", deviceId: "admin" }),
+      ),
+    );
+  });
   it("allows approved teacher section, atomic student, attendance and SMS lifecycle", async () => {
     const db = await ready();
     await assertSucceeds(setDoc(ref(db, "sparkSections/new"), section()));
@@ -425,6 +493,51 @@ describe("Spark client trust boundaries", () => {
 });
 
 describe("subjects and adviser dismissal", () => {
+  it("allows native setup queries for legacy creators, advisers and assigned subject teachers", async () => {
+    await seed();
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(dbFor(), `${base}/sparkSections`),
+          where("teacherId", "==", "teacherA"),
+        ),
+      ),
+    );
+    const legacyAdviser = await assertSucceeds(
+      getDocs(
+        query(
+          collection(dbFor(), `${base}/sparkSections`),
+          where("adviserId", "==", "teacherA"),
+        ),
+      ),
+    );
+    expect(legacyAdviser.size).toBe(0);
+    await env.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(ref(context.firestore(), "sparkSections/sectionA"), {
+        adviserId: "teacherB",
+        subjectTeacherIds: ["teacherA"],
+      });
+    });
+    const adviser = await assertSucceeds(
+      getDocs(
+        query(
+          collection(dbFor("teacherB"), `${base}/sparkSections`),
+          where("adviserId", "==", "teacherB"),
+        ),
+      ),
+    );
+    expect(adviser.docs.some((doc) => doc.id === "sectionA")).toBe(true);
+    const subject = await assertSucceeds(
+      getDocs(
+        query(
+          collection(dbFor(), `${base}/sparkSections`),
+          where("subjectTeacherIds", "array-contains", "teacherA"),
+        ),
+      ),
+    );
+    expect(subject.docs.some((doc) => doc.id === "sectionA")).toBe(true);
+  });
+
   async function assigned() {
     await seed();
     await createStudent();

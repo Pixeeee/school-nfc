@@ -225,3 +225,47 @@ describe("teacher app layout", () => {
     expect(container.querySelector("table")?.textContent).toContain("Math");
   });
 });
+
+it("shows section management only to the current Spark adviser", async () => {
+  api.backend = "SPARK";
+  api.getTeacherSetup.mockResolvedValueOnce({
+    sections: [
+      { id: "shared", name: "Shared", adviserId: "teacher_a", isAdviser: true },
+    ],
+    academicYears: [],
+    gradeLevels: [],
+  });
+  await render();
+  expect(container.textContent).toContain("Manage section");
+});
+it("keeps section management hidden from assigned subject teachers", async () => {
+  api.backend = "SPARK";
+  api.getTeacherSetup.mockResolvedValueOnce({
+    sections: [
+      {
+        id: "shared",
+        name: "Shared",
+        adviserId: "teacher_b",
+        isAdviser: false,
+        subjects: [
+          {
+            id: "math",
+            name: "Math",
+            teacherId: "teacher_a",
+            isAssigned: true,
+            startTime: "08:00",
+            endTime: "09:00",
+          },
+        ],
+      },
+    ],
+    academicYears: [],
+    gradeLevels: [],
+  });
+  await render();
+  expect(container.textContent).not.toContain("Manage section");
+  const addStudent = [...container.querySelectorAll("button")].find((button) =>
+    button.textContent?.includes("Add student"),
+  );
+  expect(addStudent?.disabled).toBe(true);
+});

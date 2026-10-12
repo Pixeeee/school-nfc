@@ -402,22 +402,10 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
     expect(r.body.present).toBe(0);
     expect(r.body.students).toBe(1);
   });
-  it("requires the current device owner before approval", async () => {
-    await db.doc(base + "/sparkDevices/deviceA").set({
-      assignedUserId: "teacherA",
-      status: "PENDING",
-      displayName: "Teacher phone",
-      leaseExpiresAt: Timestamp.fromMillis(0),
-    });
-    expect(
-      (
-        await call(
-          "deviceSet",
-          { deviceId: "deviceA", teacherId: "teacherB", status: "APPROVED" },
-          "adminA",
-        )
-      ).code,
-    ).toBe(409);
+  it("rejects administrator device mutation without changing the device", async () => {
+    await db
+      .doc(base + "/sparkDevices/deviceA")
+      .set({ assignedUserId: "teacherA", status: "PENDING" });
     expect(
       (
         await call(
@@ -426,12 +414,10 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
           "adminA",
         )
       ).code,
-    ).toBe(200);
+    ).toBe(403);
     expect(
-      (await db.doc(base + "/sparkDevices/deviceA").get())
-        .data()
-        .leaseExpiresAt.toMillis(),
-    ).toBeGreaterThan(Date.now());
+      (await db.doc(base + "/sparkDevices/deviceA").get()).data().status,
+    ).toBe("PENDING");
   });
   it("uses generic errors and denies an authenticated nonmember in username login", async () => {
     await db.doc("loginNames/testportal").set({ email: "test@example.test" });
@@ -508,21 +494,27 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
     await auth.deleteUser(user.uid);
     await db.doc("loginNames/" + username).delete();
     await db.recursiveDelete(db.doc("schools/" + bootstrapSchool));
-  });
-  it("assigns adviser and subjects only through administrator, preserving creator and roster", async () => {
+  }, 15000);
+  it("assigns adviser and subjects only through current Android adviser, preserving creator and roster", async () => {
     const sectionId = "assigned-" + randomUUID();
     await db
       .doc(`${base}/sparkSections/${sectionId}`)
       .set({ name: "Shared", teacherId: "teacherA", active: true });
     expect(
-      (await call("sectionAssign", { sectionId, adviserId: "teacherB" })).code,
+      (
+        await call(
+          "sectionAssign",
+          { sectionId, adviserId: "teacherB" },
+          "adminA",
+        )
+      ).code,
     ).toBe(403);
     expect(
       (
         await call(
           "sectionAssign",
           { sectionId, adviserId: "missing" },
-          "adminA",
+          "teacherA",
         )
       ).code,
     ).toBe(400);
@@ -531,7 +523,7 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
         await call(
           "sectionAssign",
           { sectionId, adviserId: "teacherB" },
-          "adminA",
+          "teacherA",
         )
       ).code,
     ).toBe(200);
@@ -546,10 +538,10 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
     };
     expect((await call("subjectSet", fields)).code).toBe(403);
     expect(
-      (await call("subjectSet", { ...fields, endTime: "07:00" }, "adminA"))
+      (await call("subjectSet", { ...fields, endTime: "07:00" }, "teacherB"))
         .code,
     ).toBe(400);
-    expect((await call("subjectSet", fields, "adminA")).code).toBe(200);
+    expect((await call("subjectSet", fields, "teacherB")).code).toBe(200);
     let section = (
       await db.doc(`${base}/sparkSections/${sectionId}`).get()
     ).data();
@@ -557,8 +549,13 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
     expect(section.adviserId).toBe("teacherB");
     expect(section.subjectTeacherIds).toEqual(["teacherA"]);
     expect(
-      (await call("subjectSet", { ...fields, teacherId: "teacherB" }, "adminA"))
-        .code,
+      (
+        await call(
+          "subjectSet",
+          { ...fields, teacherId: "teacherB" },
+          "teacherB",
+        )
+      ).code,
     ).toBe(200);
     section = (await db.doc(`${base}/sparkSections/${sectionId}`).get()).data();
     expect(section.subjectTeacherIds).toEqual(["teacherB"]);

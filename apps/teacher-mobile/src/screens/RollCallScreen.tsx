@@ -9,7 +9,7 @@ import type {
   TeacherSetup,
 } from "../native/types";
 import { Banner, Button, Field } from "../components/Ui";
-import { SectionForm, StudentForm } from "./TeacherForms";
+import { SectionForm, StudentForm, SectionManagement } from "./TeacherForms";
 
 const smsLabels = {
   NONE: "No SMS queued",
@@ -47,7 +47,9 @@ export function RollCallScreen({
   const [setup, setSetup] = useState<TeacherSetup | null>(null);
   const [students, setStudents] = useState<RosterStudent[]>([]);
   const [date, setDate] = useState("");
-  const [form, setForm] = useState<"section" | "student" | null>(null);
+  const [form, setForm] = useState<"section" | "student" | "management" | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [busyStudent, setBusyStudent] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -266,6 +268,27 @@ export function RollCallScreen({
           <Plus /> New section
         </Button>
       </section>
+      {section?.isAdviser && device.backend === "SPARK" && (
+        <Button
+          variant="secondary"
+          disabled={form !== null || busyStudent !== null || dismissal !== null}
+          onClick={() => setForm("management")}
+        >
+          Manage section
+        </Button>
+      )}
+      {form === "management" && section?.isAdviser && (
+        <SectionManagement
+          key={section.id}
+          section={section}
+          onCancel={() => setForm(null)}
+          onSaved={async () => {
+            await loadSetup();
+            setForm(null);
+            setNotice("Section configuration saved.");
+          }}
+        />
+      )}
       {section && device.backend === "SPARK" && (
         <section className="section-picker">
           <Field label="Subject">

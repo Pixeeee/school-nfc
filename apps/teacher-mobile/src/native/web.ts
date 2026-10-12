@@ -12,6 +12,17 @@ import type {
 } from "./types";
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
+  async activeTeacherDirectory(): Promise<{
+    teachers: import("./types").ActiveTeacher[];
+  }> {
+    throw new Error("Teacher configuration requires the Android app.");
+  }
+  async sectionAssign(): Promise<{ adviserId: string }> {
+    throw new Error("Teacher configuration requires the Android app.");
+  }
+  async subjectSet(): Promise<{ subjectId: string }> {
+    throw new Error("Teacher configuration requires the Android app.");
+  }
   async updateSubject(): Promise<{ subjectId: string }> {
     throw new Error("Subjects require the Android app.");
   }

@@ -24,6 +24,10 @@ class SparkGateway(private val preferences: DevicePreferences) {
     suspend fun call(name: String, data: Map<String, Any?>): Map<String, Any?> {
         val schoolId = data["schoolId"]?.toString() ?: preferences.schoolId ?: error("Choose a school first.")
         return when (name) {
+            "activeTeacherDirectory", "sectionAssign", "subjectSet" -> {
+                val token = requireNotNull(auth.currentUser).getIdToken(true).await().token ?: error("Sign in again.")
+                PortalLoginClient.configure(name, data.filterKeys { it !in setOf("schoolId", "deviceId", "leaseId") }, token)
+            }
             "registerDevice" -> register(schoolId, text(data, "displayName"))
             "renewDeviceLease" -> renew(schoolId)
             "getTeacherSetup" -> setup(schoolId)

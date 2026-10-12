@@ -169,6 +169,18 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         resolve(call, result + ("sections" to enriched))
     }
 
+    @PluginMethod fun activeTeacherDirectory(call: PluginCall) = launch(call) {
+        resolve(call, cloud.call("activeTeacherDirectory", teacherContext()))
+    }
+
+    @PluginMethod fun sectionAssign(call: PluginCall) = launch(call) {
+        resolve(call, cloud.call("sectionAssign", teacherContext() + listOf("sectionId", "adviserId").associateWith { required(call, it) }))
+    }
+
+    @PluginMethod fun subjectSet(call: PluginCall) = launch(call) {
+        resolve(call, cloud.call("subjectSet", teacherContext() + listOf("subjectId", "sectionId", "teacherId", "name", "startTime", "endTime").associateWith { required(call, it) }))
+    }
+
     @PluginMethod fun updateSubject(call: PluginCall) = launch(call) {
         val result = cloud.call("updateSubject", teacherContext() + listOf("subjectId", "name", "startTime", "endTime").associateWith { required(call, it) })
         SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()

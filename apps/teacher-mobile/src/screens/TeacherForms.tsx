@@ -1,6 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { SchoolNfc } from "../native/plugin";
-import type { TeacherSetup } from "../native/types";
+import type {
+  ActiveTeacher,
+  SectionSummary,
+  TeacherSetup,
+} from "../native/types";
 import { Banner, Button, Field } from "../components/Ui";
 
 export function SectionForm({
@@ -212,6 +216,207 @@ export function StudentForm({
           </Button>
         </div>
       </form>
+    </section>
+  );
+}
+
+export function SectionManagement({
+  section,
+  onSaved,
+  onCancel,
+}: {
+  section: SectionSummary;
+  onSaved: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [teachers, setTeachers] = useState<ActiveTeacher[]>([]);
+  const [adviserId, setAdviserId] = useState(section.adviserId ?? "");
+  const [subjectId, setSubjectId] = useState("");
+  const [fields, setFields] = useState({
+    teacherId: "",
+    name: "",
+    startTime: "08:00",
+    endTime: "09:00",
+  });
+  const [newSubjectId] = useState(() => crypto.randomUUID());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void SchoolNfc.activeTeacherDirectory()
+      .then((result) => {
+        if (active) setTeachers(result.teachers);
+      })
+      .catch((e) => {
+        if (active)
+          setError(
+            e instanceof Error
+              ? e.message
+              : "Teacher directory could not be loaded.",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  async function save(operation: () => Promise<unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      await operation();
+      await onSaved();
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Configuration could not be saved.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  function teacherOptions() {
+    return (
+      <>
+        <option value="">Choose a teacher</option>
+        {teachers.map((teacher) => (
+          <option key={teacher.id} value={teacher.id}>
+            {teacher.name}
+            {teacher.username ? ` · ${teacher.username}` : ""}
+          </option>
+        ))}
+      </>
+    );
+  }
+  return (
+    <section className="teacher-form" aria-labelledby="management-heading">
+      <h2 id="management-heading">Manage {section.name}</h2>
+      {error && <Banner>{error}</Banner>}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save(() =>
+            SchoolNfc.sectionAssign({ sectionId: section.id, adviserId }),
+          );
+        }}
+      >
+        <Field label="Section adviser">
+          <select
+            required
+            value={adviserId}
+            disabled={busy}
+            onChange={(e) => setAdviserId(e.target.value)}
+          >
+            {teacherOptions()}
+          </select>
+        </Field>
+        <p>
+          Changing the adviser transfers section management to the selected
+          teacher.
+        </p>
+        <Button
+          type="submit"
+          disabled={busy || !teachers.length || adviserId === section.adviserId}
+        >
+          Save adviser
+        </Button>
+      </form>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (fields.endTime <= fields.startTime) {
+            setError("End time must be after start time.");
+            return;
+          }
+          void save(async () => {
+            await SchoolNfc.subjectSet({
+              ...fields,
+              sectionId: section.id,
+              subjectId: subjectId || newSubjectId,
+            });
+          });
+        }}
+      >
+        <Field label="Subject to configure">
+          <select
+            value={subjectId}
+            disabled={busy}
+            onChange={(e) => {
+              const selected = section.subjects?.find(
+                (subject) => subject.id === e.target.value,
+              );
+              setSubjectId(e.target.value);
+              setFields(
+                selected
+                  ? {
+                      teacherId: selected.teacherId,
+                      name: selected.name,
+                      startTime: selected.startTime,
+                      endTime: selected.endTime,
+                    }
+                  : {
+                      teacherId: "",
+                      name: "",
+                      startTime: "08:00",
+                      endTime: "09:00",
+                    },
+              );
+            }}
+          >
+            <option value="">Add subject</option>
+            {section.subjects?.map((subject) => (
+              <option key={subject.id} value={subject.id}>
+                {subject.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Subject name">
+          <input
+            required
+            maxLength={80}
+            value={fields.name}
+            disabled={busy}
+            onChange={(e) => setFields({ ...fields, name: e.target.value })}
+          />
+        </Field>
+        <Field label="Assigned teacher">
+          <select
+            required
+            value={fields.teacherId}
+            disabled={busy}
+            onChange={(e) =>
+              setFields({ ...fields, teacherId: e.target.value })
+            }
+          >
+            {teacherOptions()}
+          </select>
+        </Field>
+        <Field label="Subject start">
+          <input
+            required
+            type="time"
+            value={fields.startTime}
+            disabled={busy}
+            onChange={(e) =>
+              setFields({ ...fields, startTime: e.target.value })
+            }
+          />
+        </Field>
+        <Field label="Subject end">
+          <input
+            required
+            type="time"
+            value={fields.endTime}
+            disabled={busy}
+            onChange={(e) => setFields({ ...fields, endTime: e.target.value })}
+          />
+        </Field>
+        <Button type="submit" disabled={busy || !teachers.length}>
+          {subjectId ? "Save subject assignment" : "Add subject"}
+        </Button>
+      </form>
+      <Button variant="secondary" disabled={busy} onClick={onCancel}>
+        Close management
+      </Button>
     </section>
   );
 }

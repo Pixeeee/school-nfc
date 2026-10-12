@@ -89,7 +89,7 @@ describe("portal obsolete response protection", () => {
           return response(profile("teacher", "TEACHER"));
         if (action === "sectionList") return response(setup);
         if (action === "studentList") return response({ students: [] });
-        return response({ teachers: [], devices: [] });
+        return response({ teachers: [], attendance: [] });
       }),
     );
     await act(async () => root.render(<SparkPortal />));
@@ -133,7 +133,7 @@ describe("portal obsolete response protection", () => {
                   },
                 ],
               });
-        return response({ teachers: [], devices: [] });
+        return response({ teachers: [], attendance: [] });
       }),
     );
     await act(async () => root.render(<SparkPortal />));
@@ -183,7 +183,7 @@ describe("portal obsolete response protection", () => {
             username: "teacher_new",
             password: "Generated-Test-Password",
           });
-        return response({ teachers: [], devices: [], students: [] });
+        return response({ teachers: [], attendance: [], students: [] });
       }),
     );
     await act(async () => root.render(<SparkPortal />));
@@ -254,6 +254,7 @@ describe("portal obsolete response protection", () => {
             attendance: [
               {
                 id: "recordA",
+                teacherId: "subjectTeacher",
                 studentId: "studentA",
                 studentName: "Assigned student",
                 sectionId: "A",
@@ -262,6 +263,7 @@ describe("portal obsolete response protection", () => {
               },
               {
                 id: "recordB",
+                teacherId: "adviserB",
                 studentId: "studentB",
                 studentName: "Unrelated student",
                 sectionId: "B",
@@ -289,5 +291,182 @@ describe("portal obsolete response protection", () => {
     await flush();
     expect(container.textContent).toContain("Assigned student");
     expect(container.textContent).not.toContain("Unrelated student");
+  });
+  it("shows read-only daily analytics and no class configuration or roll-call controls", async () => {
+    session.currentUser = user("admin");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, options) => {
+        const input = JSON.parse(options.body);
+        if (input.action === "overview")
+          return response(profile("admin", "SCHOOL_ADMIN"));
+        if (input.action === "sectionList")
+          return response({
+            ...setup,
+            sections: [setup.sections[0]],
+            subjects: [
+              {
+                id: "math",
+                sectionId: "A",
+                teacherId: "mathTeacher",
+                name: "Math",
+                startTime: "09:00",
+                endTime: "10:00",
+              },
+              {
+                id: "science",
+                sectionId: "A",
+                teacherId: "scienceTeacher",
+                name: "Science",
+                startTime: "10:00",
+                endTime: "11:00",
+              },
+            ],
+          });
+        if (input.action === "studentList")
+          return response({
+            students: [
+              {
+                id: "s1",
+                displayName: "One",
+                studentNumber: "1",
+                parentName: "Parent One",
+                parentPhone: "+639171111111",
+                status: "LATE",
+              },
+              {
+                id: "s2",
+                displayName: "Two",
+                studentNumber: "2",
+                parentName: "Parent Two",
+                parentPhone: "+639172222222",
+                status: "ABSENT",
+              },
+            ],
+          });
+        if (input.action === "attendanceList")
+          return response({
+            attendance: [
+              {
+                id: "a1",
+                studentId: "s1",
+                sectionId: "A",
+                subjectId: "math",
+                teacherId: "mathTeacher",
+                status: "ON_TIME",
+                source: "ANDROID",
+              },
+              {
+                id: "a2",
+                studentId: "s1",
+                sectionId: "A",
+                subjectId: "science",
+                teacherId: "scienceTeacher",
+                status: "LATE",
+                source: "ANDROID",
+              },
+              {
+                id: "a3",
+                studentId: "s2",
+                sectionId: "A",
+                subjectId: "math",
+                teacherId: "mathTeacher",
+                status: "ABSENT",
+                source: "ANDROID",
+              },
+            ],
+          });
+        return response({ teachers: [], attendance: [] });
+      }),
+    );
+    await act(async () => root.render(<SparkPortal />));
+    await flush();
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((b) => b.textContent === "Sections & students")!
+        .click(),
+    );
+    await flush();
+    expect(container.querySelector("form")).toBeNull();
+    expect(container.querySelector('input[name="name"]')).toBeNull();
+    const buttons = [...container.querySelectorAll("button")].map(
+      (button) => button.textContent,
+    );
+    for (const label of [
+      "Add subject",
+      "Save assignment",
+      "Create section",
+      "Add student",
+      "Present",
+      "Absent",
+    ])
+      expect(buttons).not.toContain(label);
+    const metrics = [...container.querySelectorAll(".metric")].map((metric) => [
+      metric.querySelector("span")?.textContent,
+      metric.querySelector("strong")?.textContent,
+    ]);
+    expect(metrics).toEqual([
+      ["On time", "1"],
+      ["Late", "1"],
+      ["Absent", "1"],
+      ["Unmarked", "1"],
+    ]);
+    expect(container.textContent).toContain(
+      "Teachers manage their classes in the Android app",
+    );
+  });
+  it("preserves unclassified Present records without claiming an on-time arrival", async () => {
+    session.currentUser = user("admin");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, options) => {
+        const input = JSON.parse(options.body);
+        if (input.action === "overview")
+          return response(profile("admin", "SCHOOL_ADMIN"));
+        if (input.action === "sectionList")
+          return response({ ...setup, sections: [setup.sections[0]] });
+        if (input.action === "studentList")
+          return response({
+            students: [
+              {
+                id: "s",
+                displayName: "Student",
+                studentNumber: "1",
+                parentName: "Parent",
+                parentPhone: "+639171111111",
+                status: "PRESENT",
+              },
+            ],
+          });
+        if (input.action === "attendanceList")
+          return response({
+            attendance: [
+              {
+                id: "record",
+                studentId: "s",
+                sectionId: "A",
+                status: "PRESENT",
+                source: "ANDROID",
+              },
+            ],
+          });
+        return response({ teachers: [], attendance: [] });
+      }),
+    );
+    await act(async () => root.render(<SparkPortal />));
+    await flush();
+    await act(async () =>
+      [...container.querySelectorAll("button")]
+        .find((b) => b.textContent === "Sections & students")!
+        .click(),
+    );
+    await flush();
+    const metrics = [...container.querySelectorAll(".metric")].map((metric) => [
+      metric.querySelector("span")?.textContent,
+      metric.querySelector("strong")?.textContent,
+    ]);
+    expect(metrics).toContainEqual(["On time", "0"]);
+    expect(metrics).toContainEqual(["Present", "1"]);
+    expect(metrics).toContainEqual(["Unmarked", "0"]);
   });
 });

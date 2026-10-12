@@ -193,3 +193,165 @@ it("keeps independent latest subject tags for the same student/day", () => {
     ["science", "ABSENT"],
   ]);
 });
+
+describe("teacher configuration authorization", () => {
+  it.each([
+    "sectionAssign",
+    "subjectSet",
+    "sectionCreate",
+    "studentCreate",
+    "attendanceSet",
+    "deviceSet",
+  ])("rejects administrator %s before any mutation", async (action) => {
+    const s = setup(member("SCHOOL_ADMIN"));
+    expect((await call(s.handler, { action })).code).toBe(403);
+    expect(s.db.doc).toHaveBeenCalledTimes(1);
+  });
+  function configuration(
+    section,
+    target = member(),
+    subjects = [],
+    actor = member(),
+  ) {
+    const auth = {
+      verifyIdToken: vi.fn(async () => ({
+        uid: "teacherA",
+        portalClient: "ANDROID",
+      })),
+    };
+    const snapshot = (data) => ({ exists: !!data, data: () => data });
+    const tx = {
+      get: vi.fn(async (ref) =>
+        ref.path?.endsWith("/members/teacherA")
+          ? actor
+          : ref.path?.includes("/members/")
+            ? target
+            : ref.path?.includes("/sparkSections/")
+              ? snapshot(section)
+              : ref.path?.includes("/sparkSubjects/")
+                ? { exists: false }
+                : { docs: subjects },
+      ),
+      update: vi.fn(),
+      set: vi.fn(),
+    };
+    const query = {
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      get: vi.fn(async () => ({ docs: [] })),
+    };
+    const db = {
+      doc: vi.fn((path) => ({
+        path,
+        get: async () =>
+          path.endsWith("/members/teacherA")
+            ? member()
+            : snapshot({ status: "ACTIVE" }),
+      })),
+      collection: vi.fn(() => query),
+      runTransaction: vi.fn(async (fn) => fn(tx)),
+    };
+    return {
+      tx,
+      query,
+      handler: createPortalHandler({ auth, db, schoolId: "schoolA" }),
+    };
+  }
+  const fields = {
+    action: "subjectSet",
+    sectionId: "shared",
+    subjectId: "math",
+    teacherId: "teacherB",
+    name: "Math",
+    startTime: "08:00",
+    endTime: "09:00",
+  };
+  it("checks current adviser inside the write transaction and cannot seize another class", async () => {
+    const s = configuration({
+      active: true,
+      teacherId: "teacherA",
+      adviserId: "teacherB",
+    });
+    expect(
+      (
+        await call(s.handler, {
+          action: "sectionAssign",
+          sectionId: "shared",
+          adviserId: "teacherA",
+        })
+      ).code,
+    ).toBe(403);
+    expect(s.tx.update).not.toHaveBeenCalled();
+  });
+  it("rejects inactive assignees without changing subjects or roster access", async () => {
+    const s = configuration(
+      { active: true, adviserId: "teacherA" },
+      member("TEACHER", "SUSPENDED"),
+    );
+    expect((await call(s.handler, fields)).code).toBe(400);
+    expect(s.tx.set).not.toHaveBeenCalled();
+    expect(s.tx.update).not.toHaveBeenCalled();
+  });
+  it.each([
+    member("TEACHER", "SUSPENDED"),
+    member("SCHOOL_ADMIN"),
+    { exists: false },
+  ])(
+    "rejects a membership revoked after initial authentication before assignment writes",
+    async (actor) => {
+      const s = configuration(
+        { active: true, adviserId: "teacherA" },
+        member(),
+        [],
+        actor,
+      );
+      expect((await call(s.handler, fields)).code).toBe(403);
+      expect(s.tx.get).toHaveBeenCalledTimes(1);
+      expect(s.tx.get).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "schools/schoolA/members/teacherA" }),
+      );
+      expect(s.tx.set).not.toHaveBeenCalled();
+      expect(s.tx.update).not.toHaveBeenCalled();
+    },
+  );
+  it("updates the subject and shared section access together", async () => {
+    const s = configuration({ active: true, adviserId: "teacherA" }, member(), [
+      { id: "science", data: () => ({ teacherId: "teacherC", active: true }) },
+    ]);
+    expect((await call(s.handler, fields)).code).toBe(200);
+    expect(s.tx.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringContaining("/sparkSubjects/math"),
+      }),
+      expect.objectContaining({ teacherId: "teacherB", sectionId: "shared" }),
+      { merge: true },
+    );
+    expect(s.tx.update).toHaveBeenCalledWith(expect.anything(), {
+      subjectTeacherIds: ["teacherB", "teacherC"],
+    });
+  });
+  it("returns only safe directory fields", async () => {
+    const s = configuration({});
+    s.query.get.mockResolvedValue({
+      docs: [
+        {
+          id: "teacherB",
+          data: () => ({
+            displayName: "Teacher B",
+            username: "teacher_b",
+            email: "private@example.test",
+            password: "secret",
+            role: "TEACHER",
+            status: "ACTIVE",
+          }),
+        },
+      ],
+    });
+    const r = await call(s.handler, { action: "activeTeacherDirectory" });
+    expect(r.code).toBe(200);
+    expect(r.body).toEqual({
+      teachers: [{ id: "teacherB", name: "Teacher B", username: "teacher_b" }],
+    });
+    expect(s.query.where).toHaveBeenCalledWith("status", "==", "ACTIVE");
+  });
+});

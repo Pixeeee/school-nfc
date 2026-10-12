@@ -14,3 +14,9 @@ describe("web fallback", () => {
     ).rejects.toThrow(/Android/);
   });
 });
+it("rejects teacher configuration outside Android", async () => {
+  const p = new SchoolNfcWeb();
+  await expect(p.activeTeacherDirectory()).rejects.toThrow(/Android/);
+  await expect(p.sectionAssign()).rejects.toThrow(/Android/);
+  await expect(p.subjectSet()).rejects.toThrow(/Android/);
+});

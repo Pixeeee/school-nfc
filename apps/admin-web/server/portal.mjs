@@ -14,6 +14,9 @@ const text = (max) => z.string().trim().min(1).max(max);
 const email = z.string().trim().toLowerCase().email().max(254);
 const schemas = {
   overview: z.object({ action: z.literal("overview") }).strict(),
+  activeTeacherDirectory: z
+    .object({ action: z.literal("activeTeacherDirectory") })
+    .strict(),
   teacherList: z.object({ action: z.literal("teacherList") }).strict(),
   teacherCreate: z
     .object({
@@ -108,13 +111,20 @@ const schemas = {
     .strict(),
 };
 const adminActions = new Set([
-  "sectionAssign",
-  "subjectSet",
   "teacherList",
   "teacherCreate",
   "deviceList",
   "deviceSet",
   "attendanceList",
+]);
+const teacherActions = new Set([
+  "activeTeacherDirectory",
+  "sectionAssign",
+  "subjectSet",
+  "sectionCreate",
+  "studentCreate",
+  "attendanceSet",
+  "deviceSet",
 ]);
 const rows = (snapshot) =>
   snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
@@ -260,6 +270,11 @@ export function createPortalHandler({
         );
       if (adminActions.has(body.action) && !isAdmin)
         throw new RequestError(403, "Administrator access required.");
+      if (
+        teacherActions.has(body.action) &&
+        (isAdmin || token.portalClient !== "ANDROID")
+      )
+        throw new RequestError(403, "Teacher Android access required.");
       const parsed = schemas[body.action]?.safeParse(body);
       if (!parsed?.success)
         throw new RequestError(400, "Check the submitted fields.");
@@ -273,36 +288,66 @@ export function createPortalHandler({
         ? db.collection(`${base}/sparkSections`)
         : db.collection(`${base}/sparkSections`).where("teacherId", "==", uid);
       switch (input.action) {
-        case "sectionAssign": {
-          const teacher = await db
-            .doc(`${base}/members/${input.adviserId}`)
-            .get();
-          if (
-            !teacher.exists ||
-            teacher.data().status !== "ACTIVE" ||
-            teacher.data().role !== "TEACHER"
-          )
-            throw new RequestError(400, "Choose an active teacher.");
-          await requireSection(input.sectionId, uid, true);
-          await db
-            .doc(`${base}/sparkSections/${input.sectionId}`)
-            .update({ adviserId: input.adviserId });
-          return res.json({ adviserId: input.adviserId });
+        case "activeTeacherDirectory": {
+          const teachers = rows(
+            await db
+              .collection(`${base}/members`)
+              .where("role", "==", "TEACHER")
+              .where("status", "==", "ACTIVE")
+              .limit(250)
+              .get(),
+          );
+          return res.json({
+            teachers: teachers.map((teacher) => ({
+              id: teacher.id,
+              name: teacher.displayName || teacher.username || "Teacher",
+              username: teacher.username || "",
+            })),
+          });
         }
+        case "sectionAssign":
         case "subjectSet": {
-          if (input.endTime <= input.startTime)
+          if (input.action === "subjectSet" && input.endTime <= input.startTime)
             throw new RequestError(400, "End time must be after start time.");
-          await requireSection(input.sectionId, uid, true);
-          const teacher = await db
-            .doc(`${base}/members/${input.teacherId}`)
-            .get();
-          if (
-            !teacher.exists ||
-            teacher.data().status !== "ACTIVE" ||
-            teacher.data().role !== "TEACHER"
-          )
-            throw new RequestError(400, "Choose an active teacher.");
           await db.runTransaction(async (tx) => {
+            const actingMember = await tx.get(db.doc(`${base}/members/${uid}`));
+            if (
+              !actingMember.exists ||
+              actingMember.data().status !== "ACTIVE" ||
+              actingMember.data().role !== "TEACHER"
+            )
+              throw new RequestError(
+                403,
+                "Your teacher account is not active.",
+              );
+            const sectionRef = db.doc(
+              `${base}/sparkSections/${input.sectionId}`,
+            );
+            const section = await tx.get(sectionRef);
+            if (
+              !section.exists ||
+              !section.data().active ||
+              (section.data().adviserId || section.data().teacherId) !== uid
+            )
+              throw new RequestError(
+                403,
+                "Only the current section adviser can configure this section.",
+              );
+            const targetId =
+              input.action === "sectionAssign"
+                ? input.adviserId
+                : input.teacherId;
+            const teacher = await tx.get(db.doc(`${base}/members/${targetId}`));
+            if (
+              !teacher.exists ||
+              teacher.data().status !== "ACTIVE" ||
+              teacher.data().role !== "TEACHER"
+            )
+              throw new RequestError(400, "Choose an active teacher.");
+            if (input.action === "sectionAssign") {
+              tx.update(sectionRef, { adviserId: input.adviserId });
+              return;
+            }
             const ref = db.doc(`${base}/sparkSubjects/${input.subjectId}`);
             const previous = await tx.get(ref);
             if (
@@ -322,23 +367,29 @@ export function createPortalHandler({
               ...new Set([
                 input.teacherId,
                 ...others.docs
-                  .filter((d) => d.id !== input.subjectId)
+                  .filter((d) => d.id !== input.subjectId && d.data().active)
                   .map((d) => d.data().teacherId),
               ]),
             ];
-            tx.set(ref, {
-              sectionId: input.sectionId,
-              teacherId: input.teacherId,
-              name: input.name,
-              startTime: input.startTime,
-              endTime: input.endTime,
-              active: true,
-            });
-            tx.update(db.doc(`${base}/sparkSections/${input.sectionId}`), {
-              subjectTeacherIds: teacherIds,
-            });
+            tx.set(
+              ref,
+              {
+                sectionId: input.sectionId,
+                teacherId: input.teacherId,
+                name: input.name,
+                startTime: input.startTime,
+                endTime: input.endTime,
+                active: true,
+              },
+              { merge: true },
+            );
+            tx.update(sectionRef, { subjectTeacherIds: teacherIds });
           });
-          return res.json({ subjectId: input.subjectId });
+          return res.json(
+            input.action === "sectionAssign"
+              ? { adviserId: input.adviserId }
+              : { subjectId: input.subjectId },
+          );
         }
         case "overview": {
           const sections = rows(await sectionQuery.limit(250).get()).filter(

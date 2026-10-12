@@ -74,7 +74,26 @@ export interface CardWriteState {
   cardId?: string;
   message?: string;
 }
+export interface ActiveTeacher {
+  id: string;
+  name: string;
+  username: string;
+}
+export interface SubjectConfiguration {
+  subjectId: string;
+  sectionId: string;
+  teacherId: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+}
 export interface SchoolNfcPlugin {
+  activeTeacherDirectory(): Promise<{ teachers: ActiveTeacher[] }>;
+  sectionAssign(options: {
+    sectionId: string;
+    adviserId: string;
+  }): Promise<{ adviserId: string }>;
+  subjectSet(options: SubjectConfiguration): Promise<{ subjectId: string }>;
   updateSubject(options: {
     subjectId: string;
     name: string;
@@ -87,10 +106,7 @@ export interface SchoolNfcPlugin {
     subjectId: string;
     tag: "ON_TIME" | "LATE" | "ABSENT";
   }): Promise<ScanResult>;
-  subjectAttendance(options: {
-    sectionId: string;
-    date: string;
-  }): Promise<{
+  subjectAttendance(options: { sectionId: string; date: string }): Promise<{
     attendance: Array<{
       studentId: string;
       subjectId?: string;
