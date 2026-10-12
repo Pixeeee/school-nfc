@@ -24,9 +24,10 @@ class SparkGateway(private val preferences: DevicePreferences) {
     suspend fun call(name: String, data: Map<String, Any?>): Map<String, Any?> {
         val schoolId = data["schoolId"]?.toString() ?: preferences.schoolId ?: error("Choose a school first.")
         return when (name) {
-            "activeTeacherDirectory", "sectionAssign", "subjectSet" -> {
+            "activeTeacherDirectory", "sectionAssign", "subjectSet", "createTeacherSection", "createTeacherStudent" -> {
                 val token = requireNotNull(auth.currentUser).getIdToken(true).await().token ?: error("Sign in again.")
-                PortalLoginClient.configure(name, data.filterKeys { it !in setOf("schoolId", "deviceId", "leaseId") }, token)
+                val action = when (name) { "createTeacherSection" -> "sectionCreate"; "createTeacherStudent" -> "studentCreate"; else -> name }
+                PortalLoginClient.configure(action, data.filterKeys { it !in setOf("schoolId", "deviceId", "leaseId") }, token)
             }
             "registerDevice" -> register(schoolId, text(data, "displayName"))
             "renewDeviceLease" -> renew(schoolId)
@@ -35,8 +36,6 @@ class SparkGateway(private val preferences: DevicePreferences) {
             "subjectAttendance" -> subjectAttendance(schoolId, data)
             "claimDismissal" -> claimDismissal(schoolId, data)
             "dismissalPreview" -> dismissalPreview(schoolId, data)
-            "createTeacherSection" -> createSection(schoolId, data)
-            "createTeacherStudent" -> createStudent(schoolId, data)
             "getDeviceSnapshot" -> snapshot(schoolId, data)
             "ingestAttendanceBatch" -> attendance(schoolId, data)
             "ingestSmsResults" -> sms(schoolId, data)
@@ -57,10 +56,10 @@ class SparkGateway(private val preferences: DevicePreferences) {
         val docs = listOf(collection.whereEqualTo("teacherId", uid), collection.whereEqualTo("adviserId", uid), collection.whereArrayContains("subjectTeacherIds", uid))
             .flatMap { it.get(Source.SERVER).await().documents }.distinctBy { it.id }
         return docs.filter { it.getBoolean("active") == true && ((it.getString("adviserId") ?: it.getString("teacherId")) == uid || (it.get("subjectTeacherIds") as? List<*>)?.contains(uid) == true) }.map { doc ->
-            val adviser = doc.getString("adviserId") ?: doc.getString("teacherId")
+            val adviser = if (doc.getString("classKind") == "SUBJECT") "" else doc.getString("adviserId") ?: doc.getString("teacherId")
             var query = root.collection("sparkSubjects").whereEqualTo("sectionId", doc.id)
             if (adviser != uid) query = query.whereEqualTo("teacherId", uid)
-            doc.data.orEmpty() + mapOf("id" to doc.id, "adviserId" to adviser, "subjects" to query.get(Source.SERVER).await().documents.filter { it.getBoolean("active") == true }.map { it.data.orEmpty() + mapOf("id" to it.id, "isAssigned" to (it.getString("teacherId") == uid)) })
+            doc.data.orEmpty() + mapOf("id" to doc.id, "classKind" to (doc.getString("classKind") ?: "ADVISORY"), "isAdviser" to (adviser == uid), "canManageRoster" to (if (doc.getString("classKind") == "SUBJECT") doc.getString("teacherId") == uid else adviser == uid), "adviserId" to adviser, "subjects" to query.get(Source.SERVER).await().documents.filter { it.getBoolean("active") == true }.map { it.data.orEmpty() + mapOf("id" to it.id, "isAssigned" to (it.getString("teacherId") == uid)) })
         }
     }
 
@@ -80,7 +79,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
         membership(schoolId)
         val sectionId = text(data, "sectionId"); val root = school(schoolId)
         val section = root.collection("sparkSections").document(sectionId).get(Source.SERVER).await()
-        val adviser = section.getString("adviserId") ?: section.getString("teacherId")
+        val adviser = if (section.getString("classKind") == "SUBJECT") "" else section.getString("adviserId") ?: section.getString("teacherId")
         var query = root.collection("sparkAttendance").whereEqualTo("sectionId", sectionId).whereEqualTo("localSchoolDate", text(data, "date"))
         if (adviser != uid) query = query.whereEqualTo("teacherId", uid)
         return mapOf("attendance" to query.get(Source.SERVER).await().documents.map { it.data.orEmpty() + ("id" to it.id) })
@@ -89,7 +88,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
     private suspend fun dismissalRecipients(schoolId: String, sectionId: String): List<String> {
         val root = school(schoolId)
         val section = root.collection("sparkSections").document(sectionId).get(Source.SERVER).await()
-        require(section.getBoolean("active") == true && (section.getString("adviserId") ?: section.getString("teacherId")) == uid) { "Only the adviser can dismiss this section." }
+        require(section.getString("classKind") != "SUBJECT" && section.getBoolean("active") == true && (section.getString("adviserId") ?: section.getString("teacherId")) == uid) { "Only the adviser can dismiss this section." }
         return root.collection("sparkStudents").whereEqualTo("sectionId", sectionId).whereEqualTo("status", "ACTIVE").get(Source.SERVER).await().documents
             .filter { it.getBoolean("parentConsent") == true && it.getBoolean("parentPhoneVerified") == true && it.getString("parentPhone")?.matches(Regex("^\\+639\\d{9}$")) == true }.map { it.id }
     }
@@ -109,7 +108,7 @@ class SparkGateway(private val preferences: DevicePreferences) {
         val claim = db.runTransaction { tx ->
             val old = tx.get(ref)
             val section = tx.get(root.collection("sparkSections").document(sectionId))
-            require(section.getBoolean("active") == true && (section.getString("adviserId") ?: section.getString("teacherId")) == uid) { "Only the adviser can dismiss the section." }
+            require(section.getString("classKind") != "SUBJECT" && section.getBoolean("active") == true && (section.getString("adviserId") ?: section.getString("teacherId")) == uid) { "Only the adviser can dismiss the section." }
             if (old.exists()) {
                 require(old.getString("teacherId") == uid && old.getString("deviceId") == preferences.deviceId) { "Out was already recorded for this section today on another phone." }
                 old.data.orEmpty()
@@ -152,56 +151,6 @@ class SparkGateway(private val preferences: DevicePreferences) {
         return mapOf("sections" to sections(schoolId),
             "academicYears" to named(root.collection("academicYears").get(Source.SERVER).await().documents),
             "gradeLevels" to named(root.collection("gradeLevels").get(Source.SERVER).await().documents))
-    }
-
-    private suspend fun createSection(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
-        authorized(schoolId)
-        val id = text(data, "requestId"); java.util.UUID.fromString(id)
-        val name = text(data, "name"); require(name.length <= 80)
-        val year = text(data, "academicYearId"); val grade = text(data, "gradeLevelId")
-        val root = school(schoolId); val ref = root.collection("sparkSections").document(id)
-        db.runTransaction { tx ->
-            val old = tx.get(ref)
-            if (old.exists()) {
-                require(old.getString("teacherId") == uid && old.getString("name") == name && old.getString("gradeLevelId") == grade && old.getString("academicYearId") == year) { "This request already created a different section." }
-            } else {
-                require(tx.get(root.collection("academicYears").document(year)).getBoolean("active") == true)
-                require(tx.get(root.collection("gradeLevels").document(grade)).getBoolean("active") == true)
-                tx.set(ref, mapOf("name" to name, "teacherId" to uid, "adviserId" to uid, "academicYearId" to year, "gradeLevelId" to grade,
-                    "active" to true, "deviceId" to preferences.deviceId, "createdAt" to FieldValue.serverTimestamp()))
-            }
-        }.await()
-        return mapOf("sectionId" to id)
-    }
-
-    private suspend fun createStudent(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {
-        authorized(schoolId)
-        val id = text(data, "requestId"); java.util.UUID.fromString(id)
-        val section = text(data, "sectionId")
-        val number = text(data, "studentNumber").uppercase(java.util.Locale.ROOT)
-        require(Regex("^[A-Z0-9][A-Z0-9_-]{0,39}$").matches(number)) { "Use letters, digits, dashes or underscores in the student number." }
-        val first = text(data, "firstName"); val last = text(data, "lastName"); val parent = text(data, "parentName")
-        require(listOf(first, last, parent).all { it.length <= 120 }) { "Names must be at most 120 characters." }
-        val phone = normalizePhone(text(data, "parentPhone"))
-        require(data["parentPhoneVerified"] == true && data["parentConsent"] == true) { "Check the parent number and record consent first." }
-        val root = school(schoolId); val ref = root.collection("sparkStudents").document(id)
-        val index = root.collection("sparkStudentNumbers").document(number)
-        val values = mapOf("sectionId" to section, "studentNumber" to number, "firstName" to first, "lastName" to last,
-            "displayName" to "$first $last", "parentName" to parent, "parentPhone" to phone, "parentPhoneVerified" to true,
-            "parentConsent" to true, "status" to "ACTIVE", "createdBy" to uid, "deviceId" to preferences.deviceId)
-        db.runTransaction { tx ->
-            val old = tx.get(ref)
-            if (old.exists()) {
-                require(values.all { (key, value) -> old.get(key) == value }) { "This request already created a different student." }
-            } else {
-                val sectionDoc = tx.get(root.collection("sparkSections").document(section))
-                require((sectionDoc.getString("adviserId") ?: sectionDoc.getString("teacherId")) == uid && sectionDoc.getBoolean("active") == true) { "Choose one of your active sections." }
-                require(!tx.get(index).exists()) { "Student number is already registered." }
-                tx.set(ref, values + ("createdAt" to FieldValue.serverTimestamp()))
-                tx.set(index, mapOf("studentId" to id, "sectionId" to section))
-            }
-        }.await()
-        return mapOf("studentId" to id, "guardianId" to "${id}_parent")
     }
 
     private suspend fun snapshot(schoolId: String, data: Map<String, Any?>): Map<String, Any?> {

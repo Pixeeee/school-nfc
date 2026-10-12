@@ -55,8 +55,19 @@ const schemas = {
       action: z.literal("sectionCreate"),
       requestId: z.string().uuid(),
       name: text(80),
-      gradeLevelId: id,
-      academicYearId: id,
+      gradeLevelId: id.optional(),
+      academicYearId: id.optional(),
+      classKind: z.enum(["ADVISORY", "SUBJECT"]).optional(),
+      grade: z.number().int().min(1).max(12).optional(),
+      subjectName: text(80).optional(),
+      startTime: z
+        .string()
+        .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+        .optional(),
+      endTime: z
+        .string()
+        .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+        .optional(),
     })
     .strict(),
   studentList: z
@@ -75,7 +86,8 @@ const schemas = {
         .string()
         .trim()
         .toUpperCase()
-        .regex(/^[A-Z0-9][A-Z0-9_-]{0,39}$/),
+        .regex(/^[A-Z0-9][A-Z0-9_-]{0,39}$/)
+        .optional(),
       firstName: text(120),
       lastName: text(120),
       parentName: text(120),
@@ -126,6 +138,14 @@ const teacherActions = new Set([
   "attendanceSet",
   "deviceSet",
 ]);
+const adviserId = (section) =>
+  section.classKind === "SUBJECT"
+    ? ""
+    : (section.adviserId ?? section.teacherId);
+const canManageRoster = (section, uid) =>
+  section.classKind === "SUBJECT"
+    ? section.teacherId === uid
+    : adviserId(section) === uid;
 const rows = (snapshot) =>
   snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 export function latestNativeRollCall(records) {
@@ -167,12 +187,26 @@ export function createPortalHandler({
   fetchImpl = fetch,
 }) {
   const base = `schools/${schoolId}`;
+  async function requireActiveTeacher(tx, uid) {
+    const member = await tx.get(db.doc(`${base}/members/${uid}`));
+    const school = await tx.get(db.doc(base));
+    if (
+      !member.exists ||
+      member.data().status !== "ACTIVE" ||
+      member.data().role !== "TEACHER" ||
+      school.data()?.status !== "ACTIVE"
+    )
+      throw new RequestError(
+        403,
+        "Your teacher account or school is not active.",
+      );
+  }
   async function requireSection(sectionId, uid, isAdmin = false) {
     const snap = await db.doc(`${base}/sparkSections/${sectionId}`).get();
     if (
       !snap.exists ||
       !snap.data().active ||
-      (!isAdmin && (snap.data().adviserId || snap.data().teacherId) !== uid)
+      (!isAdmin && adviserId(snap.data()) !== uid)
     )
       throw new RequestError(403, "This section is not assigned to you.");
     return snap.data();
@@ -327,7 +361,7 @@ export function createPortalHandler({
             if (
               !section.exists ||
               !section.data().active ||
-              (section.data().adviserId || section.data().teacherId) !== uid
+              adviserId(section.data()) !== uid
             )
               throw new RequestError(
                 403,
@@ -520,9 +554,14 @@ export function createPortalHandler({
         }
         case "sectionList":
           return res.json({
-            sections: rows(await sectionQuery.limit(250).get()).filter(
-              (x) => x.active,
-            ),
+            sections: rows(await sectionQuery.limit(250).get())
+              .filter((x) => x.active)
+              .map((x) => ({
+                ...x,
+                classKind: x.classKind || "ADVISORY",
+                isAdviser: adviserId(x) === uid,
+                canManageRoster: !isAdmin && canManageRoster(x, uid),
+              })),
             subjects: rows(
               await db.collection(`${base}/sparkSubjects`).limit(1000).get(),
             ),
@@ -542,48 +581,112 @@ export function createPortalHandler({
             ),
           });
         case "sectionCreate": {
-          const year = await db
-            .doc(`${base}/academicYears/${input.academicYearId}`)
-            .get();
-          const grade = await db
-            .doc(`${base}/gradeLevels/${input.gradeLevelId}`)
-            .get();
-          if (
-            !year.exists ||
-            !grade.exists ||
-            !year.data().active ||
-            !grade.data().active
-          )
+          const modern =
+            input.classKind !== undefined || input.grade !== undefined;
+          if (modern && (!input.classKind || !input.grade))
+            throw new RequestError(400, "Choose a class role and Grade 1–12.");
+          if (!modern && (!input.academicYearId || !input.gradeLevelId))
             throw new RequestError(
               400,
               "Choose an active academic year and grade.",
             );
+          if (
+            input.classKind === "SUBJECT" &&
+            (!input.subjectName ||
+              !input.startTime ||
+              !input.endTime ||
+              input.endTime <= input.startTime)
+          )
+            throw new RequestError(
+              400,
+              "Enter a subject and start/end times in order.",
+            );
+          if (
+            input.classKind !== "SUBJECT" &&
+            (input.subjectName || input.startTime || input.endTime)
+          )
+            throw new RequestError(
+              400,
+              "Subject fields require a subject class.",
+            );
           const ref = db.doc(`${base}/sparkSections/${input.requestId}`);
+          const values = {
+            name: input.name,
+            teacherId: uid,
+            adviserId: input.classKind === "SUBJECT" ? "" : uid,
+            ...(modern
+              ? { classKind: input.classKind, grade: input.grade }
+              : {}),
+            ...(input.gradeLevelId ? { gradeLevelId: input.gradeLevelId } : {}),
+            ...(input.academicYearId
+              ? { academicYearId: input.academicYearId }
+              : {}),
+            ...(input.classKind === "SUBJECT"
+              ? { subjectTeacherIds: [uid] }
+              : {}),
+          };
           await db.runTransaction(async (tx) => {
+            await requireActiveTeacher(tx, uid);
             const existing = await tx.get(ref);
+            const subjectRef = db.doc(
+              `${base}/sparkSubjects/${input.requestId}`,
+            );
+            const subject =
+              input.classKind === "SUBJECT" ? await tx.get(subjectRef) : null;
+            for (const [collection, target] of [
+              ["academicYears", input.academicYearId],
+              ["gradeLevels", input.gradeLevelId],
+            ]) {
+              if (
+                target &&
+                !(
+                  await tx.get(db.doc(`${base}/${collection}/${target}`))
+                ).data()?.active
+              )
+                throw new RequestError(
+                  400,
+                  "Choose an active academic year and grade.",
+                );
+            }
             if (existing.exists) {
               if (
-                existing.data().teacherId !== uid ||
-                existing.data().name !== input.name
+                Object.entries(values).some(
+                  ([key, value]) =>
+                    JSON.stringify(existing.data()[key]) !==
+                    JSON.stringify(value),
+                ) ||
+                (subject &&
+                  (!subject.exists ||
+                    ["name", "startTime", "endTime"].some(
+                      (key) =>
+                        subject.data()[key] !==
+                        input[key === "name" ? "subjectName" : key],
+                    )))
               )
                 throw new RequestError(409, "Request was already used.");
               return;
             }
+            if (subject?.exists)
+              throw new RequestError(409, "Request was already used.");
             tx.create(ref, {
-              name: input.name,
-              gradeLevelId: input.gradeLevelId,
-              academicYearId: input.academicYearId,
-              teacherId: uid,
-              adviserId: uid,
+              ...values,
               active: true,
               deviceId: "WEB",
               createdAt: FieldValue.serverTimestamp(),
             });
+            if (subject)
+              tx.create(subjectRef, {
+                sectionId: ref.id,
+                teacherId: uid,
+                name: input.subjectName,
+                startTime: input.startTime,
+                endTime: input.endTime,
+                active: true,
+              });
           });
-          return res.json({ id: ref.id });
+          return res.json({ id: ref.id, sectionId: ref.id });
         }
         case "studentCreate": {
-          await requireSection(input.sectionId, uid);
           let parentPhone;
           try {
             parentPhone = normalizePhilippineMobile(input.parentPhone);
@@ -594,44 +697,105 @@ export function createPortalHandler({
             );
           }
           const ref = db.doc(`${base}/sparkStudents/${input.requestId}`);
-          const number = db.doc(
-            `${base}/sparkStudentNumbers/${input.studentNumber}`,
-          );
-          await db.runTransaction(async (tx) => {
+          const values = {
+            sectionId: input.sectionId,
+            firstName: input.firstName,
+            lastName: input.lastName,
+            displayName: input.firstName + " " + input.lastName,
+            parentName: input.parentName,
+            parentPhone,
+            parentPhoneVerified: true,
+            parentConsent: true,
+            status: "ACTIVE",
+            createdBy: uid,
+          };
+          const studentNumber = await db.runTransaction(async (tx) => {
+            await requireActiveTeacher(tx, uid);
+            const section = await tx.get(
+              db.doc(`${base}/sparkSections/${input.sectionId}`),
+            );
+            if (
+              !section.exists ||
+              !section.data().active ||
+              !canManageRoster(section.data(), uid)
+            )
+              throw new RequestError(
+                403,
+                "Only the class roster owner can create students.",
+              );
             const existing = await tx.get(ref);
-            const index = await tx.get(number);
             if (existing.exists) {
               if (
-                existing.data().createdBy !== uid ||
-                existing.data().studentNumber !== input.studentNumber ||
-                existing.data().sectionId !== input.sectionId
+                Object.entries(values).some(
+                  ([key, value]) => existing.data()[key] !== value,
+                ) ||
+                (input.studentNumber &&
+                  existing.data().studentNumber !== input.studentNumber)
               )
                 throw new RequestError(409, "Request was already used.");
-              return;
+              return existing.data().studentNumber;
             }
-            if (index.exists)
+            let number = input.studentNumber,
+              counter,
+              next;
+            if (section.data().classKind || !number) {
+              let grade = section.data().grade;
+              if (grade === undefined && section.data().gradeLevelId) {
+                const legacyGrade = await tx.get(
+                  db.doc(`${base}/gradeLevels/${section.data().gradeLevelId}`),
+                );
+                const match = /^Grade\s+(\d{1,2})$/i.exec(
+                  legacyGrade.data()?.name || "",
+                );
+                if (match) grade = Number(match[1]);
+              }
+              if (!Number.isInteger(grade) || grade < 1 || grade > 12)
+                throw new RequestError(
+                  400,
+                  "This legacy section needs a student number.",
+                );
+              const name =
+                section
+                  .data()
+                  .name.normalize("NFKD")
+                  .replace(/[\u0300-\u036f]/g, "")
+                  .toUpperCase()
+                  .replace(/[^A-Z0-9]+/g, "-")
+                  .replace(/^-|-$/g, "")
+                  .slice(0, 24) || "SECTION";
+              const prefix = `G${grade}-${name}`;
+              counter = db.doc(`${base}/sparkStudentCodeCounters/${prefix}`);
+              next = (await tx.get(counter)).data()?.next || 1;
+              do {
+                number = `${prefix}-${String(next++).padStart(3, "0")}`;
+              } while (
+                (await tx.get(db.doc(`${base}/sparkStudentNumbers/${number}`)))
+                  .exists
+              );
+            } else if (
+              (await tx.get(db.doc(`${base}/sparkStudentNumbers/${number}`)))
+                .exists
+            )
               throw new RequestError(409, "Student number already exists.");
+            if (counter) tx.set(counter, { next });
             tx.create(ref, {
-              sectionId: input.sectionId,
-              studentNumber: input.studentNumber,
-              firstName: input.firstName,
-              lastName: input.lastName,
-              displayName: input.firstName + " " + input.lastName,
-              parentName: input.parentName,
-              parentPhone,
-              parentPhoneVerified: true,
-              parentConsent: true,
-              status: "ACTIVE",
-              createdBy: uid,
+              ...values,
+              studentNumber: number,
               deviceId: "WEB",
               createdAt: FieldValue.serverTimestamp(),
             });
-            tx.create(number, {
+            tx.create(db.doc(`${base}/sparkStudentNumbers/${number}`), {
               studentId: ref.id,
               sectionId: input.sectionId,
             });
+            return number;
           });
-          return res.json({ id: ref.id });
+          return res.json({
+            id: ref.id,
+            studentId: ref.id,
+            guardianId: `${ref.id}_parent`,
+            studentNumber,
+          });
         }
         case "studentList": {
           await requireSection(input.sectionId, uid, isAdmin);

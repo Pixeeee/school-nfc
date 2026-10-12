@@ -111,6 +111,12 @@ class NativeAttendanceTest {
             prefs.authorizationUserId = "other_user"
             assertFalse(prefs.leaseValid())
             prefs.authorizationUserId = uid
+            val late = repository.markPresent("test_school", "student_a", "section_a", "LATE")
+            assertEquals("ACCEPTED", late.status)
+            assertEquals("LATE", database.attendance().byUuid(requireNotNull(late.eventUuid))!!.attendanceTag)
+            assertEquals("DUPLICATE", repository.markPresent("test_school", "student_a", "section_a", "LATE").status)
+            assertEquals(2, database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend).size)
+            assertNotNull(runCatching { repository.markPresent("test_school", "student_a", "section_a", "INVALID") }.exceptionOrNull())
             val absent = repository.markAbsent("test_school", "student_a", "section_a")
             assertEquals("ACCEPTED", absent.status)
             assertEquals(1, absent.smsQueued)
@@ -119,7 +125,7 @@ class NativeAttendanceTest {
             val messages = database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend)
             assertTrue(messages.any { it.renderedMessage.contains("is absent") && CryptoManager().decrypt(it.encryptedPhone) == "+639171234567" })
             assertEquals("ACCEPTED", repository.markPresent("test_school", "student_a", "section_a").status)
-            assertEquals(3, database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend).size)
+            assertEquals(4, database.smsOutbox().dirtyForScope(20, "test_school", uid, prefs.backend).size)
             database.sections().upsert(listOf(SectionEntity("section_a", "A", uid, org.json.JSONArray(listOf(
                 mapOf("id" to "math", "teacherId" to uid, "name" to "Math", "startTime" to "08:00", "endTime" to "09:00"),
                 mapOf("id" to "science", "teacherId" to uid, "name" to "Science", "startTime" to "09:00", "endTime" to "10:00")

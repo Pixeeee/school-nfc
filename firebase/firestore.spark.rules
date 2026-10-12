@@ -21,7 +21,7 @@ service cloud.firestore {
     }
     function adviser(school, id) {
       let s = get(/databases/$(database)/documents/schools/$(school)/sparkSections/$(id)).data;
-      return teacher(school) && s.active == true && (s.get('adviserId', s.teacherId) == request.auth.uid || admin(school));
+      return teacher(school) && s.active == true && s.get('classKind', 'ADVISORY') != 'SUBJECT' && (s.get('adviserId', s.teacherId) == request.auth.uid || admin(school));
     }
     function subjectTeacher(school, id, sectionId) {
       let s = get(/databases/$(database)/documents/schools/$(school)/sparkSubjects/$(id)).data;
@@ -78,7 +78,7 @@ service cloud.firestore {
       match /sparkStudents/{id} {
         allow get: if teacher(school) && (!exists(/databases/$(database)/documents/schools/$(school)/sparkStudents/$(id)) || section(school, resource.data.sectionId));
         allow list: if section(school, resource.data.sectionId);
-        allow create: if teacherWrite(school) && adviser(school, request.resource.data.sectionId) && device(school, request.resource.data.deviceId)
+        allow create: if teacherWrite(school) && get(/databases/$(database)/documents/schools/$(school)/sparkSections/$(request.resource.data.sectionId)).data.get('classKind', 'LEGACY') == 'LEGACY' && adviser(school, request.resource.data.sectionId) && device(school, request.resource.data.deviceId)
           && request.resource.data.keys().hasOnly(['sectionId', 'studentNumber', 'firstName', 'lastName', 'displayName', 'parentName', 'parentPhone', 'parentPhoneVerified', 'parentConsent', 'status', 'createdBy', 'deviceId', 'createdAt'])
           && request.resource.data.studentNumber is string && request.resource.data.studentNumber.matches('^[A-Z0-9][A-Z0-9_-]{0,39}$')
           && text(request.resource.data.firstName, 120) && text(request.resource.data.lastName, 120) && text(request.resource.data.parentName, 120)

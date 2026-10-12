@@ -78,9 +78,12 @@ class AttendanceRepository(
         return recordStudent(session, student, card.id, "NFC", now)
     }
 
-    suspend fun markPresent(schoolId: String, studentId: String, sectionId: String): ScanOutcome = markRollCall(schoolId, studentId, sectionId, "ARRIVAL")
-    suspend fun markAbsent(schoolId: String, studentId: String, sectionId: String): ScanOutcome = markRollCall(schoolId, studentId, sectionId, "ABSENT")
-    private suspend fun markRollCall(schoolId: String, studentId: String, sectionId: String, mode: String): ScanOutcome = recordMutex.withLock {
+    suspend fun markPresent(schoolId: String, studentId: String, sectionId: String, tag: String = "ON_TIME"): ScanOutcome {
+        require(tag in setOf("ON_TIME", "LATE")) { "Choose On time or Late." }
+        return markRollCall(schoolId, studentId, sectionId, "ARRIVAL", tag)
+    }
+    suspend fun markAbsent(schoolId: String, studentId: String, sectionId: String): ScanOutcome = markRollCall(schoolId, studentId, sectionId, "ABSENT", "ABSENT")
+    private suspend fun markRollCall(schoolId: String, studentId: String, sectionId: String, mode: String, tag: String): ScanOutcome = recordMutex.withLock {
         require(mode != "ABSENT" || preferences.backend == "SPARK") { "Absent roll call requires the Spark backend." }
         require(preferences.cachedRosterValid()) { "Synchronize this account's roster before taking attendance." }
         require(schoolId == preferences.schoolId) { "This phone belongs to another school." }
@@ -93,10 +96,10 @@ class AttendanceRepository(
         val now = System.currentTimeMillis()
         val date = Instant.ofEpochMilli(now).atZone(ZoneId.of(preferences.schoolTimeZone)).toLocalDate().toString()
         val last = database.attendance().latestRollCall(schoolId, studentId, date, uid, preferences.backend)
-        if (last?.eventType == mode) return@withLock ScanOutcome("DUPLICATE", Instant.ofEpochMilli(now).toString(), last.eventUuid, student.id, student.displayName, student.studentNumber, mode, "This attendance status is already recorded.", 0, student.photoPath)
+        if (last != null && (last.attendanceTag.ifEmpty { if (last.eventType == "ABSENT") "ABSENT" else "ON_TIME" }) == tag) return@withLock ScanOutcome("DUPLICATE", Instant.ofEpochMilli(now).toString(), last.eventUuid, student.id, student.displayName, student.studentNumber, mode, "This attendance status is already recorded.", 0, student.photoPath)
         val session = ActiveScannerSession(UUID.randomUUID().toString(), schoolId, mode, sectionId, null)
         database.scannerSessions().insert(ScannerSessionEntity(session.id, schoolId, mode, sectionId, null, uid, now))
-        recordStudent(session, student, "", "MANUAL", maxOf(now, (last?.createdAtEpochMs ?: 0) + 1))
+        recordStudent(session, student, "", "MANUAL", maxOf(now, (last?.createdAtEpochMs ?: 0) + 1), attendanceTag = tag)
     }
 
     suspend fun markSubject(schoolId: String, studentId: String, sectionId: String, subjectId: String, tag: String): ScanOutcome = recordMutex.withLock {

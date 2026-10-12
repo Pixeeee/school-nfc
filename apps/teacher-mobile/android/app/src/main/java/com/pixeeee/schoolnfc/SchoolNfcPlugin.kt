@@ -165,7 +165,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         val sections = (result["sections"] as? List<*>)?.filterIsInstance<Map<*, *>>() ?: emptyList()
         database.sections().upsert(sections.map { SectionEntity(it["id"].toString(), it["name"].toString(), it["adviserId"]?.toString() ?: it["teacherId"]?.toString() ?: "", org.json.JSONArray(it["subjects"] as? List<*> ?: emptyList<Any>()).toString()) })
         preferences.allowedSectionIds = sections.map { it["id"].toString() }.toSet()
-        val enriched = sections.map { it + ("isAdviser" to (it["adviserId"] == cloud.currentUser()?.uid)) }
+        val enriched = sections.map { it + ("isAdviser" to (it["classKind"] != "SUBJECT" && it["adviserId"] == cloud.currentUser()?.uid)) }
         resolve(call, result + ("sections" to enriched))
     }
 
@@ -213,8 +213,8 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     @PluginMethod fun createSection(call: PluginCall) = launch(call) {
         val result = cloud.call("createTeacherSection", teacherContext() + mapOf(
             "requestId" to required(call, "requestId"), "name" to required(call, "name"),
-            "gradeLevelId" to required(call, "gradeLevelId"), "academicYearId" to required(call, "academicYearId"),
-        ))
+        ) + listOf("classKind", "gradeLevelId", "academicYearId", "subjectName", "startTime", "endTime").mapNotNull { key -> call.getString(key)?.let { key to it } }.toMap() +
+            (call.getInt("grade")?.let { mapOf("grade" to it) } ?: emptyMap()))
         cloud.renewLease(requireNotNull(preferences.schoolId))
         SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
         notifyListeners("deviceStateChanged", deviceState())
@@ -222,8 +222,8 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     }
 
     @PluginMethod fun createStudent(call: PluginCall) = launch(call) {
-        val fields = listOf("requestId", "sectionId", "studentNumber", "firstName", "lastName", "parentName", "parentPhone").associateWith { required(call, it) }
-        val result = cloud.call("createTeacherStudent", teacherContext() + fields + mapOf(
+        val fields = listOf("requestId", "sectionId", "firstName", "lastName", "parentName", "parentPhone").associateWith { required(call, it) }
+        val result = cloud.call("createTeacherStudent", teacherContext() + fields + (call.getString("studentNumber")?.let { mapOf("studentNumber" to it) } ?: emptyMap()) + mapOf(
             "parentPhoneVerified" to (call.getBoolean("parentPhoneVerified") == true), "parentConsent" to (call.getBoolean("parentConsent") == true),
         ))
         SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
@@ -261,7 +261,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     }
 
     @PluginMethod fun markPresent(call: PluginCall) = launch(call) {
-        val outcome = attendance.markPresent(requireNotNull(preferences.schoolId), required(call, "studentId"), required(call, "sectionId"))
+        val outcome = attendance.markPresent(requireNotNull(preferences.schoolId), required(call, "studentId"), required(call, "sectionId"), call.getString("tag") ?: "ON_TIME")
         onScan(outcome)
         call.resolve(JSObject().put("status", outcome.status).put("localTimestamp", outcome.localTimestamp)
             .put("eventUuid", outcome.eventUuid).put("studentId", outcome.studentId).put("displayName", outcome.displayName)

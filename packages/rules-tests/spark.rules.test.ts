@@ -771,3 +771,58 @@ describe("subjects and adviser dismissal", () => {
     );
   });
 });
+
+it("keeps modern class creation/codes server authoritative and subject owners cannot use adviser paths", async () => {
+  await seed();
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(ref(db, "sparkSections/sectionA"), {
+      ...section(),
+      classKind: "SUBJECT",
+      grade: 10,
+      adviserId: "",
+      subjectTeacherIds: ["teacherA"],
+    });
+    await setDoc(ref(db, "sparkSubjects/math"), {
+      sectionId: "sectionA",
+      teacherId: "teacherA",
+      active: true,
+      name: "Math",
+      startTime: "09:00",
+      endTime: "10:30",
+    });
+    await setDoc(ref(db, "sparkStudents/studentA"), student());
+  });
+  const db = dbFor();
+  await assertSucceeds(getDoc(ref(db, "sparkSections/sectionA")));
+  await assertSucceeds(getDoc(ref(db, "sparkStudents/studentA")));
+  await assertSucceeds(
+    updateDoc(ref(db, "sparkSubjects/math"), { name: "Mathematics" }),
+  );
+  await assertFails(
+    setDoc(ref(db, "sparkStudentCodeCounters/G10-A"), { next: 2 }),
+  );
+  await assertFails(
+    setDoc(ref(db, "sparkSections/new"), {
+      ...section(),
+      classKind: "ADVISORY",
+      grade: 1,
+      adviserId: "teacherA",
+    }),
+  );
+  await assertFails(
+    setDoc(ref(db, "sparkAttendance/" + attendanceKey), attendance()),
+  );
+  await assertFails(
+    setDoc(ref(db, "sparkDismissals/sectionA_2026-10-09"), {
+      sectionId: "sectionA",
+      localSchoolDate: "2026-10-09",
+      teacherId: "teacherA",
+      deviceId: "teacherA",
+      studentIds: ["studentA"],
+      localTimestamp: "2026-10-09T08:00:00+08:00",
+      createdAt: serverTimestamp(),
+    }),
+  );
+  await assertFails(createStudent(db, { studentNumber: "G10-A-001" }));
+});

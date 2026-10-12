@@ -87,6 +87,235 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
     await db.recursiveDelete(db.doc(base));
     await deleteApp(app);
   });
+  it("creates advisory/subject classes and allocates codes atomically across concurrent requests and retries", async () => {
+    const roleSchoolId = schoolId + "-roles";
+    const base = "schools/" + roleSchoolId;
+    await db.doc(base).set({ status: "ACTIVE", timeZone: "Asia/Manila" });
+    for (const uid of ["teacherA", "teacherB"])
+      await db
+        .doc(`${base}/members/${uid}`)
+        .set({ role: "TEACHER", status: "ACTIVE" });
+    const roleHandler = createPortalHandler({
+      auth: {
+        verifyIdToken: async (uid) => ({ uid, portalClient: "ANDROID" }),
+      },
+      db,
+      schoolId: roleSchoolId,
+    });
+    async function call(action, fields, uid = "teacherA") {
+      const res = response();
+      await roleHandler(
+        {
+          method: "POST",
+          headers: { authorization: "Bearer " + uid },
+          body: { action, ...fields },
+        },
+        res,
+      );
+      return res;
+    }
+    try {
+      const sectionId = randomUUID();
+      const fields = {
+        requestId: sectionId,
+        name: "Nara",
+        grade: 10,
+        classKind: "SUBJECT",
+        subjectName: "Math",
+        startTime: "09:00",
+        endTime: "10:30",
+      };
+      expect((await call("sectionCreate", fields)).code).toBe(200);
+      const section = (
+        await db.doc(`${base}/sparkSections/${sectionId}`).get()
+      ).data();
+      expect(section).toMatchObject({
+        adviserId: "",
+        teacherId: "teacherA",
+        subjectTeacherIds: ["teacherA"],
+        grade: 10,
+        classKind: "SUBJECT",
+      });
+      expect(
+        (await db.doc(`${base}/sparkSubjects/${sectionId}`).get()).data(),
+      ).toMatchObject({
+        teacherId: "teacherA",
+        sectionId,
+        name: "Math",
+        startTime: "09:00",
+        endTime: "10:30",
+      });
+      expect(
+        (await call("sectionCreate", { ...fields, subjectName: "English" }))
+          .code,
+      ).toBe(409);
+      expect(
+        (await call("sectionAssign", { sectionId, adviserId: "teacherB" }))
+          .code,
+      ).toBe(403);
+      expect(
+        (
+          await call("subjectSet", {
+            sectionId,
+            subjectId: randomUUID(),
+            teacherId: "teacherB",
+            name: "Other",
+            startTime: "09:00",
+            endTime: "10:00",
+          })
+        ).code,
+      ).toBe(403);
+      await db
+        .doc(`${base}/sparkStudentNumbers/G10-NARA-001`)
+        .set({ studentId: "legacy", sectionId: "legacy" });
+      const student = {
+        sectionId,
+        firstName: "Test",
+        lastName: "Only",
+        parentName: "Test Parent",
+        parentPhone: "09171234567",
+        parentPhoneVerified: true,
+        parentConsent: true,
+      };
+      const requests = Array.from({ length: 6 }, () => ({
+        ...student,
+        requestId: randomUUID(),
+      }));
+      const results = await Promise.all(
+        requests.map((x) => call("studentCreate", x)),
+      );
+      expect(results.map((x) => x.code)).toEqual(Array(6).fill(200));
+      expect(new Set(results.map((x) => x.body.studentNumber)).size).toBe(6);
+      expect(results.map((x) => x.body.studentNumber).sort()).toEqual(
+        Array.from(
+          { length: 6 },
+          (_, i) => `G10-NARA-${String(i + 2).padStart(3, "0")}`,
+        ),
+      );
+      expect(
+        (await call("studentCreate", requests[0])).body.studentNumber,
+      ).toBe(results[0].body.studentNumber);
+      expect(
+        (
+          await call("studentCreate", {
+            ...requests[0],
+            parentName: "Different",
+          })
+        ).code,
+      ).toBe(409);
+      expect(
+        (
+          await call(
+            "studentCreate",
+            { ...student, requestId: randomUUID() },
+            "teacherB",
+          )
+        ).code,
+      ).toBe(403);
+      const otherClass = randomUUID();
+      expect(
+        (
+          await call(
+            "sectionCreate",
+            { ...fields, requestId: otherClass },
+            "teacherB",
+          )
+        ).code,
+      ).toBe(200);
+      const otherStudent = await call(
+        "studentCreate",
+        { ...student, sectionId: otherClass, requestId: randomUUID() },
+        "teacherB",
+      );
+      expect(otherStudent.body.studentNumber).toBe("G10-NARA-008");
+      const blockedId = randomUUID();
+      await db
+        .doc(`${base}/sparkSubjects/${blockedId}`)
+        .set({ sectionId: "another", teacherId: "teacherB", active: true });
+      expect(
+        (await call("sectionCreate", { ...fields, requestId: blockedId })).code,
+      ).toBe(409);
+      expect(
+        (await db.doc(`${base}/sparkSections/${blockedId}`).get()).exists,
+      ).toBe(false);
+      await db
+        .doc(`${base}/sparkSections/${sectionId}`)
+        .update({ active: false });
+      expect(
+        (await call("studentCreate", { ...student, requestId: randomUUID() }))
+          .code,
+      ).toBe(403);
+      await db
+        .doc(`${base}/sparkSections/${sectionId}`)
+        .update({ active: true });
+      for (const grade of [1, 12]) {
+        const r = await call("sectionCreate", {
+          requestId: randomUUID(),
+          name: "Advisory",
+          classKind: "ADVISORY",
+          grade,
+        });
+        expect(r.code).toBe(200);
+        expect(
+          (await db.doc(`${base}/sparkSections/${r.body.id}`).get()).data(),
+        ).toMatchObject({
+          grade,
+          adviserId: "teacherA",
+          classKind: "ADVISORY",
+        });
+      }
+      for (const grade of [0, 13, 1.5])
+        expect(
+          (
+            await call("sectionCreate", {
+              requestId: randomUUID(),
+              name: "Bad",
+              classKind: "ADVISORY",
+              grade,
+            })
+          ).code,
+        ).toBe(400);
+      const invalidId = randomUUID();
+      expect(
+        (
+          await call("sectionCreate", {
+            ...fields,
+            requestId: invalidId,
+            endTime: "08:59",
+          })
+        ).code,
+      ).toBe(400);
+      expect(
+        (await db.doc(`${base}/sparkSections/${invalidId}`).get()).exists,
+      ).toBe(false);
+      expect(
+        (await db.doc(`${base}/sparkSubjects/${invalidId}`).get()).exists,
+      ).toBe(false);
+      await db
+        .doc(`${base}/members/suspended`)
+        .set({ role: "TEACHER", status: "SUSPENDED" });
+      expect(
+        (
+          await call(
+            "sectionCreate",
+            { ...fields, requestId: randomUUID() },
+            "suspended",
+          )
+        ).code,
+      ).toBe(403);
+      expect(
+        (
+          await call(
+            "studentCreate",
+            { ...student, requestId: randomUUID() },
+            "suspended",
+          )
+        ).code,
+      ).toBe(403);
+    } finally {
+      await db.recursiveDelete(db.doc(base));
+    }
+  }, 30000);
   it("creates a teacher account and membership without storing a password", async () => {
     const email = randomUUID() + "@example.test";
     const username = "teacher_" + randomUUID().slice(0, 8);
@@ -568,11 +797,13 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
   it("preserves student identity when displaying native attendance", async () => {
     const studentId = randomUUID();
     expect(
-      (await call("studentCreate", {
-        ...student,
-        requestId: studentId,
-        studentNumber: "native001",
-      })).code,
+      (
+        await call("studentCreate", {
+          ...student,
+          requestId: studentId,
+          studentNumber: "native001",
+        })
+      ).code,
     ).toBe(200);
     await db.doc(`${base}/sparkAttendance/${randomUUID()}`).set({
       studentId,
