@@ -834,7 +834,10 @@ export function SparkPortal() {
               )}
               {selected && admin && (
                 <Card>
-                  <h2>Adviser and subjects</h2>
+                  <h2>
+                    Adviser and subjects ·{" "}
+                    {sections.find((s) => s.id === selected)?.name}
+                  </h2>
                   <Field label="Section adviser">
                     <select
                       value={
@@ -859,7 +862,7 @@ export function SparkPortal() {
                         .filter((t) => t.status === "ACTIVE")
                         .map((t) => (
                           <option key={t.id} value={t.id}>
-                            {t.displayName}
+                            {t.displayName} · {t.username || t.email}
                           </option>
                         ))}
                     </select>
@@ -904,7 +907,7 @@ export function SparkPortal() {
                               .filter((t) => t.status === "ACTIVE")
                               .map((t) => (
                                 <option key={t.id} value={t.id}>
-                                  {t.displayName}
+                                  {t.displayName} · {t.username || t.email}
                                 </option>
                               ))}
                           </select>
@@ -958,7 +961,7 @@ export function SparkPortal() {
                           .filter((t) => t.status === "ACTIVE")
                           .map((t) => (
                             <option key={t.id} value={t.id}>
-                              {t.displayName}
+                              {t.displayName} · {t.username || t.email}
                             </option>
                           ))}
                       </select>
