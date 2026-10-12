@@ -476,3 +476,47 @@ it("marks advisory late attendance without requiring a subject", async () => {
     "marked present late. 1 parent SMS queued.",
   );
 });
+
+it("distinguishes subject classes with the same grade and section in the class chooser", async () => {
+  api.backend = "SPARK";
+  api.getTeacherSetup.mockResolvedValueOnce({
+    sections: ["Math", "English"].map((name) => ({
+      id: name.toLowerCase(),
+      name: "Nara",
+      classKind: "SUBJECT",
+      grade: 10,
+      canManageRoster: true,
+      isAdviser: false,
+      subjects: [
+        {
+          id: name.toLowerCase(),
+          name,
+          teacherId: "teacher",
+          isAssigned: true,
+          startTime: "08:00",
+          endTime: "09:00",
+        },
+      ],
+    })),
+    academicYears: [],
+    gradeLevels: [],
+  });
+  await render();
+  const picker = container.querySelector("select")!;
+  expect([...picker.options].map((o) => o.textContent)).toEqual([
+    "Choose a section",
+    "Math · Grade 10 · Nara · Subject",
+    "English · Grade 10 · Nara · Subject",
+  ]);
+  await act(async () => {
+    picker.value = "english";
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(
+    (container.querySelectorAll("select")[1] as HTMLSelectElement).value,
+  ).toBe("english");
+  expect(api.listSectionStudents).toHaveBeenLastCalledWith({
+    sectionId: "english",
+    subjectId: "english",
+  });
+});

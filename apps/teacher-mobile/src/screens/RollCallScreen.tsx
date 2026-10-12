@@ -271,6 +271,9 @@ export function RollCallScreen({
             <option value="">Choose a section</option>
             {sections.map((s) => (
               <option key={s.id} value={s.id}>
+                {s.classKind === "SUBJECT" && s.subjects?.[0]?.name
+                  ? `${s.subjects[0].name} · `
+                  : ""}
                 {s.grade ? `Grade ${s.grade} · ` : ""}
                 {s.name}
                 {s.classKind
