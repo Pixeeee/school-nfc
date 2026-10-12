@@ -125,7 +125,7 @@ export interface SchoolNfcPlugin {
   createSection(options: CreateSectionRequest): Promise<{ sectionId: string }>;
   createStudent(
     options: CreateTeacherStudentRequest,
-  ): Promise<{ studentId: string; guardianId: string }>;
+  ): Promise<{ studentId: string; guardianId: string; studentNumber?: string }>;
   listSectionStudents(options: {
     sectionId: string;
     subjectId?: string;
@@ -137,6 +137,7 @@ export interface SchoolNfcPlugin {
   markPresent(options: {
     sectionId: string;
     studentId: string;
+    tag?: "ON_TIME" | "LATE";
   }): Promise<ScanResult>;
   getAuthState(): Promise<AuthState>;
   signIn(options: { username: string; password: string }): Promise<AuthState>;
@@ -190,7 +191,11 @@ export interface SchoolNfcPlugin {
   removeAllListeners(): Promise<void>;
 }
 
+export type ClassKind = "ADVISORY" | "SUBJECT";
 export interface SectionSummary {
+  classKind?: ClassKind;
+  grade?: number;
+  canManageRoster?: boolean;
   id: string;
   name: string;
   adviserId?: string;
@@ -221,13 +226,18 @@ export interface RosterStudent extends StudentSummary {
 export interface CreateSectionRequest {
   requestId: string;
   name: string;
-  gradeLevelId: string;
-  academicYearId: string;
+  classKind: ClassKind;
+  grade: number;
+  subjectName?: string;
+  startTime?: string;
+  endTime?: string;
+  gradeLevelId?: string;
+  academicYearId?: string;
 }
 export interface CreateTeacherStudentRequest {
   requestId: string;
   sectionId: string;
-  studentNumber: string;
+  studentNumber?: string;
   firstName: string;
   lastName: string;
   parentName: string;

@@ -1,50 +1,77 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { SchoolNfc } from "../native/plugin";
-import type {
-  ActiveTeacher,
-  SectionSummary,
-  TeacherSetup,
-} from "../native/types";
+import type { ActiveTeacher, ClassKind, SectionSummary } from "../native/types";
 import { Banner, Button, Field } from "../components/Ui";
 
 export function SectionForm({
-  setup,
+  classKind,
   onSaved,
   onCancel,
 }: {
-  setup: TeacherSetup;
+  classKind: ClassKind;
   onSaved: (id: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [requestId] = useState(() => crypto.randomUUID());
   const [name, setName] = useState("");
-  const [gradeLevelId, setGrade] = useState(setup.gradeLevels[0]?.id ?? "");
-  const [academicYearId, setYear] = useState(setup.academicYears[0]?.id ?? "");
+  const [grade, setGrade] = useState(1);
+  const [subjectName, setSubjectName] = useState("");
+  const [startTime, setStartTime] = useState("08:00");
+  const [endTime, setEndTime] = useState("09:00");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!name.trim() || (classKind === "SUBJECT" && !subjectName.trim())) {
+      setError("Enter the section and subject names.");
+      return;
+    }
+    if (
+      classKind === "SUBJECT" &&
+      (!startTime || !endTime || endTime <= startTime)
+    ) {
+      setError("End time must be after start time.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const result = await SchoolNfc.createSection({
         requestId,
         name: name.trim(),
-        gradeLevelId,
-        academicYearId,
+        classKind,
+        grade,
+        ...(classKind === "SUBJECT"
+          ? { subjectName: subjectName.trim(), startTime, endTime }
+          : {}),
       });
       await onSaved(result.sectionId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Section could not be saved.");
+      setError(e instanceof Error ? e.message : "Class could not be saved.");
     } finally {
       setBusy(false);
     }
   }
   return (
     <section className="teacher-form" aria-labelledby="section-form-heading">
-      <h2 id="section-form-heading">New section</h2>
+      <h2 id="section-form-heading">
+        New {classKind === "ADVISORY" ? "advisory" : "subject"} class
+      </h2>
       {error && <Banner>{error}</Banner>}
       <form onSubmit={submit}>
+        <Field label="Grade level">
+          <select
+            required
+            value={grade}
+            onChange={(e) => setGrade(Number(e.target.value))}
+          >
+            {Array.from({ length: 12 }, (_, i) => (
+              <option key={i + 1} value={i + 1}>
+                Grade {i + 1}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Section name">
           <input
             required
@@ -55,41 +82,35 @@ export function SectionForm({
             autoFocus
           />
         </Field>
-        <div className="form-columns">
-          <Field label="Grade level">
-            <select
-              required
-              value={gradeLevelId}
-              onChange={(e) => setGrade(e.target.value)}
-            >
-              <option value="">Choose a grade</option>
-              {setup.gradeLevels.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Academic year">
-            <select
-              required
-              value={academicYearId}
-              onChange={(e) => setYear(e.target.value)}
-            >
-              <option value="">Choose a year</option>
-              {setup.academicYears.map((y) => (
-                <option key={y.id} value={y.id}>
-                  {y.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        {(!gradeLevelId || !academicYearId) && (
-          <Banner kind="info">
-            A school administrator must configure an active academic year and
-            grade levels first.
-          </Banner>
+        {classKind === "SUBJECT" && (
+          <>
+            <Field label="Subject name">
+              <input
+                required
+                maxLength={80}
+                value={subjectName}
+                onChange={(e) => setSubjectName(e.target.value)}
+              />
+            </Field>
+            <div className="form-columns">
+              <Field label="Start time">
+                <input
+                  required
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                />
+              </Field>
+              <Field label="End time">
+                <input
+                  required
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                />
+              </Field>
+            </div>
+          </>
         )}
         <div className="form-actions">
           <Button
@@ -100,12 +121,8 @@ export function SectionForm({
           >
             Cancel
           </Button>
-          <Button
-            type="submit"
-            busy={busy}
-            disabled={!gradeLevelId || !academicYearId}
-          >
-            Create section
+          <Button type="submit" busy={busy}>
+            Create class
           </Button>
         </div>
       </form>
@@ -119,12 +136,11 @@ export function StudentForm({
   onCancel,
 }: {
   sectionId: string;
-  onSaved: () => Promise<void>;
+  onSaved: (studentNumber?: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [requestId] = useState(() => crypto.randomUUID());
   const [fields, setFields] = useState({
-    studentNumber: "",
     firstName: "",
     lastName: "",
     parentName: "",
@@ -139,14 +155,14 @@ export function StudentForm({
     setBusy(true);
     setError("");
     try {
-      await SchoolNfc.createStudent({
+      const result = await SchoolNfc.createStudent({
         ...fields,
         requestId,
         sectionId,
         parentPhoneVerified: verified,
         parentConsent: consent,
       });
-      await onSaved();
+      await onSaved(result.studentNumber);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Student could not be saved.");
     } finally {
@@ -162,7 +178,7 @@ export function StudentForm({
       <Field label={label}>
         <input
           required
-          maxLength={key === "studentNumber" ? 40 : 80}
+          maxLength={80}
           inputMode={key === "parentPhone" ? "tel" : "text"}
           value={fields[key]}
           onChange={(e) => setFields({ ...fields, [key]: e.target.value })}
@@ -176,7 +192,7 @@ export function StudentForm({
       <h2 id="student-form-heading">Add student &amp; parent</h2>
       {error && <Banner>{error}</Banner>}
       <form onSubmit={submit}>
-        {input("studentNumber", "Student number", "e.g. 2026-001")}
+        <p>The student code is generated when you save.</p>
         <div className="form-columns">
           {input("firstName", "First name")}
           {input("lastName", "Last name")}

@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import { SectionManagement } from "./TeacherForms";
+import { SectionForm, StudentForm, SectionManagement } from "./TeacherForms";
 const api = vi.hoisted(() => ({
   activeTeacherDirectory: vi.fn().mockResolvedValue({
     teachers: [
@@ -10,6 +10,14 @@ const api = vi.hoisted(() => ({
       { id: "teacherB", name: "Teacher B", username: "teacher_b" },
     ],
   }),
+  createSection: vi.fn().mockResolvedValue({ sectionId: "new" }),
+  createStudent: vi
+    .fn()
+    .mockResolvedValue({
+      studentId: "student",
+      guardianId: "parent",
+      studentNumber: "G10-NARA-001",
+    }),
   sectionAssign: vi.fn().mockResolvedValue({ adviserId: "teacherB" }),
   subjectSet: vi.fn().mockResolvedValue({ subjectId: "math" }),
 }));
@@ -122,4 +130,101 @@ it("retries a newly added subject with the same id after a failed setup refresh"
   expect(container.textContent).toContain("Refresh is offline.");
   await submit(1);
   expect(api.subjectSet.mock.calls[1]?.[0].subjectId).toBe(first.subjectId);
+});
+
+async function renderForm(component: React.ReactNode) {
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(component));
+}
+async function input(label: string, value: string) {
+  const field = [...container.querySelectorAll("label")]
+    .find((l) => l.textContent?.startsWith(label))!
+    .querySelector("input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(field, value);
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+it("creates advisory classes in any grade without school configured grades or years", async () => {
+  const onSaved = vi.fn().mockResolvedValue(undefined);
+  await renderForm(
+    <SectionForm classKind="ADVISORY" onSaved={onSaved} onCancel={() => {}} />,
+  );
+  expect(container.querySelectorAll("option")).toHaveLength(12);
+  expect(container.textContent).not.toContain("administrator");
+  await select(0, "12");
+  await input("Section name", " Nara ");
+  await submit(0);
+  expect(api.createSection).toHaveBeenCalledWith({
+    requestId: expect.any(String),
+    classKind: "ADVISORY",
+    grade: 12,
+    name: "Nara",
+  });
+  expect(onSaved).toHaveBeenCalledWith("new");
+});
+it("requires subject names and a valid schedule then preserves the request on retry", async () => {
+  const onSaved = vi.fn().mockResolvedValue(undefined);
+  await renderForm(
+    <SectionForm classKind="SUBJECT" onSaved={onSaved} onCancel={() => {}} />,
+  );
+  await input("Section name", "Nara");
+  await submit(0);
+  expect(api.createSection).not.toHaveBeenCalled();
+  await input("Subject name", "Math");
+  await input("End time", "07:00");
+  await submit(0);
+  expect(container.textContent).toContain("End time must be after start time.");
+  expect(api.createSection).not.toHaveBeenCalled();
+  await input("End time", "09:00");
+  api.createSection.mockRejectedValueOnce(new Error("Offline"));
+  await submit(0);
+  await submit(0);
+  const request = api.createSection.mock.calls[0]![0];
+  expect(request).toEqual({
+    requestId: expect.any(String),
+    classKind: "SUBJECT",
+    grade: 1,
+    name: "Nara",
+    subjectName: "Math",
+    startTime: "08:00",
+    endTime: "09:00",
+  });
+  expect(api.createSection.mock.calls[1]![0]).toEqual(request);
+});
+it("leaves student code generation to the server while keeping parent verification and consent", async () => {
+  const onSaved = vi.fn().mockResolvedValue(undefined);
+  await renderForm(
+    <StudentForm sectionId="nara" onSaved={onSaved} onCancel={() => {}} />,
+  );
+  expect(container.textContent).not.toContain("Student number");
+  await input("First name", "Juan");
+  await input("Last name", "Santos");
+  await input("Parent name", "Maria");
+  await input("Parent mobile number", "09171234567");
+  expect(
+    container.querySelectorAll('input[type="checkbox"][required]'),
+  ).toHaveLength(2);
+  await act(async () =>
+    container
+      .querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+      .forEach((c) => c.click()),
+  );
+  await submit(0);
+  expect(api.createStudent).toHaveBeenCalledWith({
+    requestId: expect.any(String),
+    sectionId: "nara",
+    firstName: "Juan",
+    lastName: "Santos",
+    parentName: "Maria",
+    parentPhone: "09171234567",
+    parentPhoneVerified: true,
+    parentConsent: true,
+  });
+  expect(onSaved).toHaveBeenCalledWith("G10-NARA-001");
 });

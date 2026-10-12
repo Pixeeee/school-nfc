@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipboardCheck, Plus, RefreshCw, UserPlus, Users } from "lucide-react";
 import { SchoolNfc } from "../native/plugin";
 import type {
+  ClassKind,
   DeviceState,
   QueueSummary,
   RosterStudent,
@@ -29,6 +30,8 @@ export function RollCallScreen({
 }) {
   const [sections, setSections] = useState<SectionSummary[]>([]);
   const [subjectId, setSubjectId] = useState("");
+  const [classKind, setClassKind] = useState<ClassKind>("ADVISORY");
+  const [selectedStudentId, setSelectedStudentId] = useState("");
   const view = useRef({ selected: "", subjectId: "" });
   const [history, setHistory] = useState<
     Array<{
@@ -166,9 +169,16 @@ export function RollCallScreen({
             subjectId,
             tag,
           })
-        : await (
-            tag === "ABSENT" ? SchoolNfc.markAbsent : SchoolNfc.markPresent
-          )({ sectionId: selected, studentId: student.id });
+        : tag === "ABSENT"
+          ? await SchoolNfc.markAbsent({
+              sectionId: selected,
+              studentId: student.id,
+            })
+          : await SchoolNfc.markPresent({
+              sectionId: selected,
+              studentId: student.id,
+              tag,
+            });
       if (result.status === "REJECTED")
         throw new Error(result.reason ?? "Attendance was rejected.");
       setNotice(
@@ -188,14 +198,23 @@ export function RollCallScreen({
   const present = students.filter((s) => s.present).length;
   const section = sections.find((s) => s.id === selected);
   const subject = section?.subjects?.find((s) => s.id === subjectId);
+  const isAdviser = section?.classKind !== "SUBJECT" && section?.isAdviser;
+  const selectedStudent = students.find((s) => s.id === selectedStudentId);
+  const canMark =
+    (subjectId && subject?.isAssigned) || !section?.subjects?.length;
   useEffect(() => {
-    setSubjectId("");
+    setSubjectId(
+      section?.classKind === "SUBJECT" && section.subjects?.length === 1
+        ? section.subjects[0]!.id
+        : "",
+    );
+    setSelectedStudentId("");
     setHistory([]);
     setHistoryShown(false);
     setDismissal(null);
     setEditing(false);
     setError("");
-  }, [selected]);
+  }, [selected, section?.classKind, section?.subjects?.length]);
   const suggestedLate = subject
     ? new Intl.DateTimeFormat("en-GB", {
         timeZone: "Asia/Manila",
@@ -210,10 +229,7 @@ export function RollCallScreen({
         <div>
           <span className="eyebrow">TEACHER ATTENDANCE</span>
           <h1>Roll call</h1>
-          <p>
-            Choose a subject, then explicitly mark Present on time, Present late
-            or Absent.
-          </p>
+          <p>Choose a class and student, then mark On time, Late or Absent.</p>
         </div>
         <div className="heading-icon">
           <ClipboardCheck />
@@ -244,7 +260,7 @@ export function RollCallScreen({
       {error && <Banner>{error}</Banner>}
       {notice && <Banner kind="success">{notice}</Banner>}
       <section className="section-picker">
-        <Field label="Your section">
+        <Field label="Your class">
           <select
             value={selected}
             disabled={
@@ -255,7 +271,11 @@ export function RollCallScreen({
             <option value="">Choose a section</option>
             {sections.map((s) => (
               <option key={s.id} value={s.id}>
+                {s.grade ? `Grade ${s.grade} · ` : ""}
                 {s.name}
+                {s.classKind
+                  ? ` · ${s.classKind === "ADVISORY" ? "Advisory" : "Subject"}`
+                  : ""}
               </option>
             ))}
           </select>
@@ -263,12 +283,25 @@ export function RollCallScreen({
         <Button
           variant="secondary"
           disabled={!setup || form !== null || busyStudent !== null}
-          onClick={() => setForm("section")}
+          onClick={() => {
+            setClassKind("ADVISORY");
+            setForm("section");
+          }}
         >
-          <Plus /> New section
+          <Plus /> Advisory
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={!setup || form !== null || busyStudent !== null}
+          onClick={() => {
+            setClassKind("SUBJECT");
+            setForm("section");
+          }}
+        >
+          <Plus /> Subject
         </Button>
       </section>
-      {section?.isAdviser && device.backend === "SPARK" && (
+      {isAdviser && device.backend === "SPARK" && (
         <Button
           variant="secondary"
           disabled={form !== null || busyStudent !== null || dismissal !== null}
@@ -277,7 +310,7 @@ export function RollCallScreen({
           Manage section
         </Button>
       )}
-      {form === "management" && section?.isAdviser && (
+      {form === "management" && isAdviser && (
         <SectionManagement
           key={section.id}
           section={section}
@@ -366,7 +399,7 @@ export function RollCallScreen({
               <Button>Save schedule</Button>
             </form>
           )}
-          {section.isAdviser && (
+          {isAdviser && (
             <>
               <Button
                 variant="secondary"
@@ -472,7 +505,8 @@ export function RollCallScreen({
       )}
       {form === "section" && setup && (
         <SectionForm
-          setup={setup}
+          key={classKind}
+          classKind={classKind}
           onCancel={() => setForm(null)}
           onSaved={async (id) => {
             await loadSetup();
@@ -486,10 +520,12 @@ export function RollCallScreen({
         <StudentForm
           sectionId={selected}
           onCancel={() => setForm(null)}
-          onSaved={async () => {
+          onSaved={async (studentNumber) => {
             await refreshRoster();
             setForm(null);
-            setNotice("Student and parent contact saved.");
+            setNotice(
+              `Student and parent contact saved.${studentNumber ? ` Student code: ${studentNumber}.` : ""}`,
+            );
           }}
         />
       )}
@@ -535,7 +571,12 @@ export function RollCallScreen({
                 disabled={
                   form !== null ||
                   busyStudent !== null ||
-                  (device.backend === "SPARK" && section?.isAdviser === false)
+                  (device.backend === "SPARK" &&
+                    !(
+                      section?.canManageRoster ??
+                      section?.isAdviser ??
+                      section?.classKind !== "SUBJECT"
+                    ))
                 }
                 onClick={() => setForm("student")}
               >
@@ -543,62 +584,60 @@ export function RollCallScreen({
               </Button>
             </div>
           </div>
-          <div className="roll-call-roster">
-            {students.map((student) => (
-              <article
-                key={student.id}
-                className={student.present ? "is-present" : ""}
-              >
-                <div className="avatar" aria-hidden="true">
-                  {student.displayName[0]}
-                </div>
+          <section
+            className="student-action-panel"
+            aria-label="Selected student attendance"
+          >
+            {selectedStudent ? (
+              <>
                 <div className="student-details">
-                  <strong>{student.displayName}</strong>
-                  <span>{student.studentNumber}</span>
-                  {student.present && (
-                    <small
-                      className={
-                        student.smsStatus === "FAILED" ||
-                        student.syncStatus === "CONFLICT"
-                          ? "needs-attention"
-                          : ""
-                      }
-                    >
-                      {smsLabels[student.smsStatus]}
-                      {student.syncStatus === "CONFLICT"
-                        ? " · Sync conflict"
-                        : ""}
-                    </small>
-                  )}
+                  <h3>{selectedStudent.displayName}</h3>
+                  <span>{selectedStudent.studentNumber}</span>
+                  <span>
+                    {selectedStudent.attendanceStatus?.replace("_", " ") ||
+                      (selectedStudent.present ? "PRESENT" : "Unmarked")}
+                  </span>
+                  <small
+                    className={
+                      selectedStudent.smsStatus === "FAILED" ||
+                      selectedStudent.syncStatus === "CONFLICT"
+                        ? "needs-attention"
+                        : ""
+                    }
+                  >
+                    {smsLabels[selectedStudent.smsStatus]}
+                    {selectedStudent.syncStatus === "CONFLICT"
+                      ? " · Sync conflict"
+                      : ""}
+                  </small>
                 </div>
-                {((subjectId && subject?.isAssigned) ||
-                  !section?.subjects?.length) && (
-                  <>
-                    <span>
-                      {student.attendanceStatus?.replace("_", " ") ||
-                        "Unmarked"}
-                    </span>
+                {canMark ? (
+                  <div className="attendance-actions">
                     <Button
                       disabled={
                         busyStudent !== null ||
                         form !== null ||
-                        student.attendanceStatus === "ON_TIME"
+                        selectedStudent.attendanceStatus === "ON_TIME"
                       }
-                      onClick={() => void markPresent(student, "ON_TIME")}
+                      onClick={() =>
+                        void markPresent(selectedStudent, "ON_TIME")
+                      }
                     >
-                      Present on time
+                      On time
                     </Button>
-                    {subjectId && (
+                    {(subjectId || device.backend === "SPARK") && (
                       <Button
                         variant="secondary"
                         disabled={
                           busyStudent !== null ||
                           form !== null ||
-                          student.attendanceStatus === "LATE"
+                          selectedStudent.attendanceStatus === "LATE"
                         }
-                        onClick={() => void markPresent(student, "LATE")}
+                        onClick={() =>
+                          void markPresent(selectedStudent, "LATE")
+                        }
                       >
-                        Present late
+                        Late
                       </Button>
                     )}
                     {device.backend === "SPARK" && (
@@ -607,16 +646,45 @@ export function RollCallScreen({
                         disabled={
                           busyStudent !== null ||
                           form !== null ||
-                          student.attendanceStatus === "ABSENT"
+                          selectedStudent.attendanceStatus === "ABSENT"
                         }
-                        onClick={() => void markPresent(student, "ABSENT")}
+                        onClick={() =>
+                          void markPresent(selectedStudent, "ABSENT")
+                        }
                       >
                         Absent
                       </Button>
                     )}
-                  </>
+                  </div>
+                ) : (
+                  <p>Choose an assigned subject to mark attendance.</p>
                 )}
-              </article>
+              </>
+            ) : (
+              <p>Tap a student below to mark attendance.</p>
+            )}
+          </section>
+          <div
+            className="roll-call-roster"
+            role="group"
+            aria-label="Student grid"
+          >
+            {students.map((student) => (
+              <button
+                type="button"
+                key={student.id}
+                className={`student-tile ${student.present ? "is-present" : ""} ${student.attendanceStatus === "ABSENT" ? "is-absent" : ""} ${student.attendanceStatus === "LATE" ? "is-late" : ""}`}
+                aria-pressed={selectedStudentId === student.id}
+                disabled={busyStudent !== null || form !== null}
+                onClick={() => setSelectedStudentId(student.id)}
+              >
+                <strong>{student.displayName}</strong>
+                <span>{student.studentNumber}</span>
+                <small>
+                  {student.attendanceStatus?.replace("_", " ") ||
+                    (student.present ? "PRESENT" : "Unmarked")}
+                </small>
+              </button>
             ))}
           </div>
           {!students.length && (

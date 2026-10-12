@@ -66,7 +66,11 @@ export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
   }
   async createStudent(
     _options: import("./types").CreateTeacherStudentRequest,
-  ): Promise<{ studentId: string; guardianId: string }> {
+  ): Promise<{
+    studentId: string;
+    guardianId: string;
+    studentNumber?: string;
+  }> {
     throw new Error("Student creation requires the Android app.");
   }
   async listSectionStudents(_options: { sectionId: string }): Promise<{
@@ -84,6 +88,7 @@ export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
   async markPresent(_options: {
     sectionId: string;
     studentId: string;
+    tag?: "ON_TIME" | "LATE";
   }): Promise<import("./types").ScanResult> {
     throw new Error("SIM attendance messages require the Android app.");
   }
