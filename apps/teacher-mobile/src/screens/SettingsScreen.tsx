@@ -16,6 +16,10 @@ export function SettingsScreen({
     String(device.selectedSubscriptionId ?? ""),
   );
   const [permission, setPermission] = useState(device.smsPermission);
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const [permissionBlocked, setPermissionBlocked] = useState(false);
+  const [simError, setSimError] = useState("");
+  const [simLoading, setSimLoading] = useState(false);
   const [phone, setPhone] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -24,6 +28,10 @@ export function SettingsScreen({
   const [schoolName, setSchoolName] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileBusy, setProfileBusy] = useState(false);
+  useEffect(() => {
+    setPermission(device.smsPermission);
+    setSelected(String(device.selectedSubscriptionId ?? ""));
+  }, [device.smsPermission, device.selectedSubscriptionId]);
   useEffect(() => {
     let cancelled = false;
     void SchoolNfc.getTeacherProfile()
@@ -71,31 +79,71 @@ export function SettingsScreen({
     }
   }
   useEffect(() => {
-    if (permission)
-      void SchoolNfc.listSubscriptions()
-        .then((r) => setSubs(r.subscriptions))
-        .catch((e) => setError(e.message));
-  }, [permission]);
+    let cancelled = false;
+    setSubs([]);
+    if (!permission) {
+      setSimLoading(false);
+      return;
+    }
+    setPermissionBlocked(false);
+    setSimError("");
+    setSimLoading(true);
+    void SchoolNfc.listSubscriptions()
+      .then((r) => {
+        if (!cancelled) setSubs(r.subscriptions);
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setSimError(
+            e instanceof Error ? e.message : "SIM list could not be loaded.",
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setSimLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [permission, device]);
   async function grantPermission() {
+    setPermissionBusy(true);
     try {
-      setError("");
+      setSimError("");
       const result = await SchoolNfc.requestSmsPermission();
       setPermission(result.granted);
+      setPermissionBlocked(result.blocked);
       if (!result.granted)
-        setError("SMS and phone permission are required to send parent texts.");
+        setSimError(
+          result.blocked
+            ? "Android has blocked further permission pop-ups. Open app permissions and allow SMS and Phone. If SMS is unavailable, your phone's installer or device policy may restrict SIM texting."
+            : "Allow both SMS and Phone in the Android pop-ups to select your SIM. Attendance remains available without texting.",
+        );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Permission request failed.");
+      setSimError(
+        e instanceof Error ? e.message : "Permission request failed.",
+      );
+    } finally {
+      setPermissionBusy(false);
+    }
+  }
+  async function openPermissions() {
+    try {
+      await SchoolNfc.openPermissionSettings();
+    } catch (e) {
+      setSimError(
+        e instanceof Error ? e.message : "Could not open app permissions.",
+      );
     }
   }
   async function select(value: string) {
     if (!value) return;
     try {
-      setError("");
+      setSimError("");
       await SchoolNfc.selectSubscription({ subscriptionId: Number(value) });
       setSelected(value);
       setMessage("Prepaid SMS SIM saved.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "SIM selection failed.");
+      setSimError(e instanceof Error ? e.message : "SIM selection failed.");
     }
   }
   async function test() {
@@ -186,14 +234,28 @@ export function SettingsScreen({
             use multiple SMS segments.
           </p>
           {!permission && (
-            <Button variant="secondary" onClick={() => void grantPermission()}>
+            <Button
+              variant="secondary"
+              busy={permissionBusy}
+              onClick={() => void grantPermission()}
+            >
               Allow SMS &amp; phone access
             </Button>
           )}
+          {simError && <Banner>{simError}</Banner>}
+          {!permission && permissionBlocked && (
+            <Button variant="secondary" onClick={() => void openPermissions()}>
+              Open app permissions
+            </Button>
+          )}
+          {permission && (
+            <p role="status">SMS and Phone permissions allowed.</p>
+          )}
+          {simLoading && <p role="status">Loading active SIMs…</p>}
           <Field label="Active SIM">
             <select
               value={selected}
-              disabled={!permission}
+              disabled={!permission || simLoading || !subs.length}
               onChange={(e) => void select(e.target.value)}
             >
               <option value="">Select a SIM</option>
@@ -204,7 +266,7 @@ export function SettingsScreen({
               ))}
             </select>
           </Field>
-          {permission && !subs.length && (
+          {permission && !simLoading && !simError && !subs.length && (
             <p>
               No active SIM found. Insert an SMS-capable SIM and reopen
               Settings.
@@ -233,7 +295,12 @@ export function SettingsScreen({
           <Button
             variant="secondary"
             busy={busy}
-            disabled={!permission || !selected || !phone.trim()}
+            disabled={
+              !permission ||
+              simLoading ||
+              !subs.some((s) => String(s.subscriptionId) === selected) ||
+              !phone.trim()
+            }
             onClick={() => void test()}
           >
             Queue test message

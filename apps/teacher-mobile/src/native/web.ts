@@ -171,7 +171,10 @@ export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
     throw new Error("SIM selection requires Android.");
   }
   async requestSmsPermission() {
-    return { granted: false };
+    return { granted: false, blocked: false };
+  }
+  async openPermissionSettings() {
+    throw new Error("SMS permissions require the Android app.");
   }
   async sendTestSms(): Promise<{ messageId: string }> {
     throw new Error("SMS requires Android.");

@@ -1,13 +1,10 @@
 
 package com.pixeeee.schoolnfc.sms
 
-import android.Manifest
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.telephony.SmsManager
-import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.pixeeee.schoolnfc.database.AppDatabase
@@ -23,10 +20,12 @@ class SmsQueueWorker(context: Context, params: WorkerParameters) : CoroutineWork
     override suspend fun doWork(): Result {
         val now = System.currentTimeMillis()
         database.smsOutbox().recoverStaleSending(now, now - 5 * 60_000)
-        if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) return Result.failure()
+        if (!SmsAccess.permissionsGranted(applicationContext)) return Result.failure()
         if (!preferences.leaseValid(now)) return Result.failure()
         val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return Result.failure()
-        val subscriptionId = preferences.selectedSubscriptionId ?: return Result.retry()
+        val subscriptionId = preferences.selectedSubscriptionId ?: return Result.success()
+        // Pause setup failures without backing off the queue; selecting a SIM schedules fresh work.
+        if (runCatching { SmsAccess.requireActiveSim(applicationContext, subscriptionId) }.isFailure) return Result.success()
         val item = database.smsOutbox().nextReadyForScope(now, preferences.schoolId ?: return Result.failure(), uid, preferences.backend) ?: return if (database.smsOutbox().retryCount() > 0) Result.retry() else Result.success()
         return try {
             val manager = SmsManager.getSmsManagerForSubscriptionId(subscriptionId)

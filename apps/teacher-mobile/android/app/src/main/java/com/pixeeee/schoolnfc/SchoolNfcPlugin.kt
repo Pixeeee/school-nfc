@@ -3,6 +3,9 @@ package com.pixeeee.schoolnfc
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
@@ -10,8 +13,6 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.telephony.SubscriptionInfo
-import android.telephony.SubscriptionManager
 import android.view.WindowManager
 import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
@@ -41,6 +42,7 @@ import com.pixeeee.schoolnfc.device.DevicePreferences
 import com.pixeeee.schoolnfc.nfc.NfcCoordinator
 import com.pixeeee.schoolnfc.security.CryptoManager
 import com.pixeeee.schoolnfc.workers.QueueScheduler
+import com.pixeeee.schoolnfc.sms.SmsAccess
 import java.time.Instant
 import java.util.UUID
 import java.time.LocalDate
@@ -51,7 +53,7 @@ import com.pixeeee.schoolnfc.sync.SnapshotSynchronizer
 
 @CapacitorPlugin(
     name = "SchoolNfc",
-    permissions = [Permission(alias = "sms", strings = [Manifest.permission.SEND_SMS, Manifest.permission.READ_PHONE_STATE])],
+    permissions = [Permission(alias = "sms", strings = [Manifest.permission.SEND_SMS]), Permission(alias = "phone", strings = [Manifest.permission.READ_PHONE_STATE])],
 )
 class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -82,7 +84,14 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         }
     }
 
-    override fun handleOnResume() { super.handleOnResume(); if (scanning || currentWritePhase in listOf("WAITING_FOR_TAG", "WRITING", "VERIFYING", "ACTIVATING")) runCatching { nfc.enable() } }
+    override fun handleOnResume() {
+        super.handleOnResume()
+        if (scanning || currentWritePhase in listOf("WAITING_FOR_TAG", "WRITING", "VERIFYING", "ACTIVATING")) runCatching { nfc.enable() }
+        if (::preferences.isInitialized) {
+            if (SmsAccess.permissionsGranted(context)) QueueScheduler.scheduleSms(context)
+            scope.launch { notifyListeners("deviceStateChanged", deviceState(false)) }
+        }
+    }
     override fun handleOnPause() { nfc.disable(); super.handleOnPause() }
     override fun handleOnDestroy() { nfc.disable(); tone.release(); scope.cancel(); super.handleOnDestroy() }
 
@@ -294,23 +303,33 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
     @PluginMethod fun getCardWriteState(call: PluginCall) { call.resolve(writeState()) }
 
     @PluginMethod fun requestSmsPermission(call: PluginCall) {
-        if (getPermissionState("sms") == PermissionState.GRANTED) call.resolve(JSObject().put("granted", true))
-        else requestPermissionForAlias("sms", call, "smsPermissionCallback")
+        activity.runOnUiThread {
+            try {
+                if (SmsAccess.permissionsGranted(context)) call.resolve(JSObject().put("granted", true).put("blocked", false))
+                else requestPermissionForAliases(arrayOf("sms", "phone"), call, "smsPermissionCallback")
+            } catch (error: Exception) { call.reject("Permission request failed: ${error.message}", error) }
+        }
     }
 
     @PermissionCallback fun smsPermissionCallback(call: PluginCall) {
-        QueueScheduler.scheduleSms(context)
-        scope.launch { notifyListeners("deviceStateChanged", deviceState()) }
-        call.resolve(JSObject().put("granted", getPermissionState("sms") == PermissionState.GRANTED))
+        val granted = SmsAccess.permissionsGranted(context)
+        if (granted) QueueScheduler.scheduleSms(context)
+        scope.launch { notifyListeners("deviceStateChanged", deviceState(false)) }
+        // One permanent denial must not be hidden by the other permission's rationale state.
+        val blocked = !granted && listOf("sms", "phone").any { getPermissionState(it) == PermissionState.DENIED }
+        call.resolve(JSObject().put("granted", granted).put("blocked", blocked))
     }
 
-    @PluginMethod fun listSubscriptions(call: PluginCall) {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
-            call.reject("Phone permission is required to select the SMS SIM."); return
+    @PluginMethod fun openPermissionSettings(call: PluginCall) {
+        activity.runOnUiThread {
+            try { activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))); call.resolve() }
+            catch (error: Exception) { call.reject("Could not open this app's permissions.", error) }
         }
-        val manager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+    }
+
+    @PluginMethod fun listSubscriptions(call: PluginCall) = launch(call) {
         val array = JSArray()
-        runCatching { manager.activeSubscriptionInfoList ?: emptyList<SubscriptionInfo>() }.getOrDefault(emptyList()).forEach { info ->
+        SmsAccess.subscriptions(context).forEach { info ->
             array.put(JSObject().put("subscriptionId", info.subscriptionId).put("displayName", info.displayName?.toString() ?: "SIM ${info.simSlotIndex + 1}")
                 .put("carrierName", info.carrierName?.toString() ?: "Unknown carrier").put("slotIndex", info.simSlotIndex).put("active", true))
         }
@@ -319,9 +338,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
 
     @PluginMethod fun selectSubscription(call: PluginCall) = launch(call) {
         val id = requireNotNull(call.getInt("subscriptionId")) { "Subscription ID is required." }
-        require(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) { "Phone permission is required." }
-        val manager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-        require(manager.activeSubscriptionInfoList.orEmpty().any { it.subscriptionId == id }) { "Select an active SMS SIM." }
+        SmsAccess.requireActiveSim(context, id)
         preferences.selectedSubscriptionId = id
         QueueScheduler.scheduleSms(context)
         notifyListeners("deviceStateChanged", deviceState())
@@ -333,7 +350,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         val message = required(call, "message").trim()
         require(message.isNotEmpty() && message.length <= 480) { "Test message is invalid." }
         val subscription = preferences.selectedSubscriptionId ?: error("Select a designated SMS SIM first.")
-        require(ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) { "SMS permission has not been granted." }
+        SmsAccess.requireActiveSim(context, subscription)
         val now = System.currentTimeMillis(); val id = UUID.randomUUID().toString()
         val owner = requireNotNull(cloud.currentUser()?.uid) { "Sign in first." }
         val renderedMessage = preferences.teacherSmsProfile(owner)?.message(message) ?: message
@@ -371,18 +388,20 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         activity.runOnUiThread { notifyListeners("cardWriteStateChanged", writeState()) }
     }
 
-    private suspend fun deviceState(): JSObject = withContext(Dispatchers.IO) {
-        if (BuildConfig.FIREBASE_SPARK && cloud.currentUser() != null && !preferences.leaseValid()) {
+    private suspend fun deviceState(renewLease: Boolean = true): JSObject = withContext(Dispatchers.IO) {
+        if (renewLease && BuildConfig.FIREBASE_SPARK && cloud.currentUser() != null && !preferences.leaseValid()) {
             preferences.schoolId = preferences.schoolId ?: "schoolattendance"
             runCatching {
                 cloud.renewLease(requireNotNull(preferences.schoolId))
                 SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
             }
         }
+        val smsGranted = SmsAccess.permissionsGranted(context)
+        val activeSim = if (smsGranted) preferences.selectedSubscriptionId?.takeIf { id -> runCatching { SmsAccess.requireActiveSim(context, id) }.isSuccess } else null
         JSObject().put("deviceId", preferences.deviceId).put("status", preferences.deviceStatus).put("schoolId", preferences.schoolId)
             .put("leaseId", preferences.leaseId).put("leaseExpiresAt", preferences.leaseExpiresAt).put("nfcAvailable", nfc.available())
-            .put("nfcEnabled", nfc.enabled()).put("smsPermission", ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED)
-            .put("backend", if (BuildConfig.FIREBASE_SPARK) "SPARK" else "FUNCTIONS").put("selectedSubscriptionId", preferences.selectedSubscriptionId).put("syncPending", database.syncOutbox().pendingCount()).put("smsPending", database.smsOutbox().pendingCount())
+            .put("nfcEnabled", nfc.enabled()).put("smsPermission", smsGranted)
+            .put("backend", if (BuildConfig.FIREBASE_SPARK) "SPARK" else "FUNCTIONS").put("selectedSubscriptionId", activeSim).put("syncPending", database.syncOutbox().pendingCount()).put("smsPending", database.smsOutbox().pendingCount())
     }
 
     private suspend fun queueState(): JSObject = withContext(Dispatchers.IO) {

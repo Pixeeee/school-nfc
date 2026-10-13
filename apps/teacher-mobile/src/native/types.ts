@@ -170,7 +170,8 @@ export interface SchoolNfcPlugin {
   getCardWriteState(): Promise<CardWriteState>;
   listSubscriptions(): Promise<{ subscriptions: SubscriptionInfo[] }>;
   selectSubscription(options: { subscriptionId: number }): Promise<void>;
-  requestSmsPermission(): Promise<{ granted: boolean }>;
+  requestSmsPermission(): Promise<{ granted: boolean; blocked: boolean }>;
+  openPermissionSettings(): Promise<void>;
   sendTestSms(options: {
     phone: string;
     message: string;
