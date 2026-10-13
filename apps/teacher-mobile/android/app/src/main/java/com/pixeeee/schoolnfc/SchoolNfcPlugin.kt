@@ -18,13 +18,11 @@ import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
-import com.getcapacitor.PermissionState
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
-import com.getcapacitor.annotation.PermissionCallback
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -306,18 +304,14 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         activity.runOnUiThread {
             try {
                 if (SmsAccess.permissionsGranted(context)) call.resolve(JSObject().put("granted", true).put("blocked", false))
-                else requestPermissionForAliases(arrayOf("sms", "phone"), call, "smsPermissionCallback")
+                // The optimized release's Capacitor launcher can stall; use Android's permission API.
+                else (activity as MainActivity).requestSmsPermissions { granted, blocked ->
+                    if (granted) QueueScheduler.scheduleSms(context)
+                    scope.launch { notifyListeners("deviceStateChanged", deviceState(false)) }
+                    call.resolve(JSObject().put("granted", granted).put("blocked", blocked))
+                }
             } catch (error: Exception) { call.reject("Permission request failed: ${error.message}", error) }
         }
-    }
-
-    @PermissionCallback fun smsPermissionCallback(call: PluginCall) {
-        val granted = SmsAccess.permissionsGranted(context)
-        if (granted) QueueScheduler.scheduleSms(context)
-        scope.launch { notifyListeners("deviceStateChanged", deviceState(false)) }
-        // One permanent denial must not be hidden by the other permission's rationale state.
-        val blocked = !granted && listOf("sms", "phone").any { getPermissionState(it) == PermissionState.DENIED }
-        call.resolve(JSObject().put("granted", granted).put("blocked", blocked))
     }
 
     @PluginMethod fun openPermissionSettings(call: PluginCall) {

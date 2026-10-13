@@ -97,4 +97,14 @@ class SmsPermissionTest {
         assertNotNull(error)
         assertTrue(error!!.message!!.contains("no longer active"))
     }
+    @Test fun cancelledPermissionRequestIsNotPermanentDenial() = withApp { activity, _ ->
+        assertFalse(SmsAccess.permissionsGranted(instrumentation.targetContext))
+        var answer: Pair<Boolean, Boolean>? = null
+        instrumentation.runOnMainSync {
+            activity.javaClass.getDeclaredField("smsPermissionResult").apply { isAccessible = true }
+                .set(activity, { granted: Boolean, blocked: Boolean -> answer = granted to blocked })
+            (activity as MainActivity).onRequestPermissionsResult(4317, emptyArray(), intArrayOf())
+        }
+        assertEquals(false to false, answer)
+    }
 }

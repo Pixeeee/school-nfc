@@ -1,10 +1,13 @@
-# SIM texting and permissions — Android 1.5.1
+# SIM texting and permissions — Android 1.5.2
 
 In **Settings**, tap **Allow SMS & phone access**, then allow both permissions in
 Android's permission pop-ups. Choose the intended carrier/slot under **Active
 SIM**. The app requires Android 8 or newer and a phone capable of SIM texting.
 
-The app now checks SMS and Phone permission together, refreshes SIM availability
+The app uses Android's standard permission request API. The previous launcher
+stalled in the optimized APK despite its registered callback. A release test
+reproduced this failure; the native API opens both prompts and resolves the
+JavaScript request. The app now checks SMS and Phone permission together, refreshes SIM availability
 when you return to the app, and validates the chosen subscription before sending.
 An absent, disabled, or removed SIM pauses sending while preserving queued texts.
 Selecting an active SIM schedules fresh work without placing it behind a setup
@@ -31,6 +34,11 @@ and [SEND_SMS permission reference](https://developer.android.com/reference/andr
 - A real WorkManager test on Android 13 confirms missing/inactive subscriptions
   finish setup work without losing the queued message or consuming send attempts.
 - Existing Android JVM tests pass; the Android app and instrumentation APK build.
+- The optimized release passes a framework-only test of actual Android permission
+  pop-ups and the real JavaScript bridge result, all attendance feedback outcomes,
+  and the app remaining open.
+- Interrupted permission requests resolve without being misclassified as permanent
+  denial; the native cancellation regression passes.
 - Focused code review found no remaining blocker after queue recovery and resume
   refresh corrections.
 
@@ -39,5 +47,5 @@ restrictions, or physical delivery. Use **Queue test message** with a number you
 control, then check the receiving phone. A queued or sent status does not establish
 delivery. Carrier load/SMS allowance and carrier support are still required.
 
-Version **1.5.1**, Android version code **8**. No billing or Firebase configuration
+Version **1.5.2**, Android version code **9**. No billing or Firebase configuration
 changes are required for this release.

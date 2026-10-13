@@ -9,6 +9,8 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.view.accessibility.AccessibilityNodeInfo;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -18,6 +20,7 @@ import java.time.Instant;
 
 // Framework-only runner verifies the exact shrunk APK without shared test-library APIs.
 public class ReleaseSmokeInstrumentation extends Instrumentation {
+    private boolean smsPopup;
     private WebView webView(View view) {
         if (view instanceof WebView) return (WebView)view;
         if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup)view).getChildCount(); i++) {
@@ -33,11 +36,16 @@ public class ReleaseSmokeInstrumentation extends Instrumentation {
         if (!done.await(2, TimeUnit.SECONDS)) throw new AssertionError("JavaScript evaluation timed out");
         return value.get();
     }
-    @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); start(); }
+    @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); smsPopup = arguments != null && arguments.getString("smsPopup", "false").equals("true"); start(); }
     @Override public void onStart() {
         Bundle result = new Bundle();
         Activity activity = null;
         try {
+            if (smsPopup) {
+                AccessibilityServiceInfo info = getUiAutomation().getServiceInfo();
+                info.flags |= AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+                getUiAutomation().setServiceInfo(info);
+            }
             if (getTargetContext().checkSelfPermission(Manifest.permission.VIBRATE) != PackageManager.PERMISSION_GRANTED)
                 throw new AssertionError("Missing attendance feedback permission");
             activity = startActivitySync(new Intent().setClassName(getTargetContext(), "com.pixeeee.schoolnfc.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -68,8 +76,26 @@ public class ReleaseSmokeInstrumentation extends Instrumentation {
                 Thread.sleep(50);
             }
             if (!"\"PASS\"".equals(bridgeResult)) throw new AssertionError("Native JavaScript bridge failed: " + bridgeResult);
+            if (smsPopup) {
+                evaluate(web, "window.Capacitor.nativePromise('SchoolNfc','requestSmsPermission',{}).then(r=>{document.documentElement.setAttribute('data-release-permission-details',JSON.stringify(r));document.documentElement.setAttribute('data-release-permission',r.granted?'PASS':'FAIL')}).catch(e=>{document.documentElement.setAttribute('data-release-permission-details',e.message);document.documentElement.setAttribute('data-release-permission','FAIL')})");
+                int prompts = 0;
+                for (int attempt = 0; attempt < 200; attempt++) {
+                    if (!"null".equals(evaluate(web, "document.documentElement.getAttribute('data-release-permission')"))) break;
+                    AccessibilityNodeInfo root = getUiAutomation().getRootInActiveWindow();
+                    if (root != null) for (String pkg : new String[]{"com.google.android.permissioncontroller", "com.android.permissioncontroller"}) {
+                        for (AccessibilityNodeInfo button : root.findAccessibilityNodeInfosByViewId(pkg + ":id/permission_allow_button"))
+                            if (button.performAction(AccessibilityNodeInfo.ACTION_CLICK)) prompts++;
+                    }
+                    Thread.sleep(50);
+                }
+                if (prompts == 0 || !"\"PASS\"".equals(evaluate(web, "document.documentElement.getAttribute('data-release-permission')")))
+                    throw new AssertionError("Release Android permission pop-ups failed: prompts=" + prompts + " result=" + evaluate(web, "document.documentElement.getAttribute('data-release-permission')") + " details=" + evaluate(web, "document.documentElement.getAttribute('data-release-permission-details')"));
+                for (String permission : new String[]{Manifest.permission.SEND_SMS, Manifest.permission.READ_PHONE_STATE})
+                    if (getTargetContext().checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED)
+                        throw new AssertionError("Release permission was not granted: " + permission);
+            }
             if (activity.isFinishing() || activity.isDestroyed()) throw new AssertionError("Attendance callback closed the activity");
-            result.putString("stream", "PASS: shrunk release starts, registers native plugin, resolves JavaScript bridge calls, executes all attendance feedback outcomes, and stays open.\n");
+            result.putString("stream", "PASS: shrunk release starts, registers native plugin, resolves JavaScript bridge calls, executes all attendance feedback outcomes, and stays open." + (smsPopup ? " Android SMS and Phone pop-ups both grant permission." : "") + "\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
             result.putString("stream", "FAIL: " + error.toString() + "\n");
