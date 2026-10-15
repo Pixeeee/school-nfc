@@ -44,11 +44,13 @@ class TeacherSmsProfileCacheTest {
         try {
             val cloud = CloudGateway(prefs)
             assertEquals("teacher_login", cloud.getTeacherProfile()["username"])
-            val saved = cloud.saveTeacherProfile(" sir_jade ", " Nara School ")
+            val custom = "Hello, {{studentName}} is {{attendanceStatus}} on {{eventDate}} at {{eventTime}}."
+            val saved = cloud.saveTeacherProfile(" sir_jade ", " Nara School ", custom, "")
             assertEquals("sir_jade", saved["username"])
             assertEquals("Nara School", cloud.getTeacherProfile()["schoolName"])
             val document = db.collection("schools").document(school).collection("teacherSmsProfiles").document(uid).get().await()
-            assertEquals(setOf("username", "schoolName", "updatedAt"), document.data!!.keys)
+            assertEquals(setOf("username", "schoolName", "attendanceTemplate", "dismissalTemplate", "updatedAt"), document.data!!.keys)
+            assertEquals(custom, prefs.teacherSmsProfile(uid)!!.attendanceTemplate)
             db.disableNetwork().await()
             assertEquals(saved, cloud.getTeacherProfile())
             assertNotNull(runCatching { cloud.saveTeacherProfile("unsaved_teacher", "Unsaved School") }.exceptionOrNull())
@@ -63,7 +65,7 @@ class TeacherSmsProfileCacheTest {
         val prefs = DevicePreferences(context); val oldSchool = prefs.schoolId
         try {
             prefs.schoolId = "profile-cache-school-a"
-            val profile = TeacherSmsProfile.validated("sir_jade", "Nara School")
+            val profile = TeacherSmsProfile.validated("sir_jade", "Nara School", "{{studentName}}: {{attendanceStatus}} at {{eventTime}} on {{eventDate}}.", "")
             prefs.cacheTeacherSmsProfile("profile-cache-teacher-a", profile)
             assertEquals(profile, DevicePreferences(context).teacherSmsProfile("profile-cache-teacher-a"))
             assertNull(prefs.teacherSmsProfile("profile-cache-teacher-b"))
@@ -73,4 +75,21 @@ class TeacherSmsProfileCacheTest {
             assertEquals(profile, prefs.teacherSmsProfile("profile-cache-teacher-a"))
         } finally { prefs.schoolId = oldSchool }
     }
+    @Test fun customRosterOrderNeverCrossesAccountSchoolOrClass() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = DevicePreferences(context); val oldSchool = prefs.schoolId; val oldUser = prefs.authorizationUserId
+        try {
+            prefs.schoolId = "order-school"; prefs.authorizationUserId = "order-teacher-a"
+            prefs.saveRosterOrder("nara", listOf("student_b", "student_a"))
+            assertEquals(listOf("student_b", "student_a"), DevicePreferences(context).rosterOrder("nara"))
+            assertTrue(prefs.rosterOrder("acacia").isEmpty())
+            prefs.authorizationUserId = "order-teacher-b"
+            assertTrue(prefs.rosterOrder("nara").isEmpty())
+            prefs.authorizationUserId = "order-teacher-a"; prefs.schoolId = "other-school"
+            assertTrue(prefs.rosterOrder("nara").isEmpty())
+            prefs.schoolId = "order-school"; prefs.saveRosterOrder("nara", emptyList())
+            assertTrue(prefs.rosterOrder("nara").isEmpty())
+        } finally { prefs.schoolId = oldSchool; prefs.authorizationUserId = oldUser }
+    }
+
 }
