@@ -39,8 +39,10 @@ service cloud.firestore {
         }
         allow get: if teacher(school) && uid == request.auth.uid;
         allow create, update: if teacher(school) && uid == request.auth.uid
-          && request.resource.data.keys().hasOnly(['username', 'schoolName', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['username', 'schoolName', 'attendanceTemplate', 'dismissalTemplate', 'updatedAt'])
           && identity(request.resource.data.username, 60) && identity(request.resource.data.schoolName, 100)
+          && request.resource.data.get('attendanceTemplate', '') is string && request.resource.data.get('attendanceTemplate', '').size() <= 600
+          && request.resource.data.get('dismissalTemplate', '') is string && request.resource.data.get('dismissalTemplate', '').size() <= 600
           && request.resource.data.updatedAt == request.time;
       }
       match /academicYears/{id} { allow read: if active(school); }
@@ -138,7 +140,7 @@ service cloud.firestore {
             && section(school, d.sectionId) && device(school, d.deviceId) && d.teacherId == request.auth.uid
             && a.eventUuid == d.attendanceEventId && a.studentId == d.studentId && a.sectionId == d.sectionId && a.teacherId == d.teacherId && a.deviceId == d.deviceId
             && student.parentPhoneVerified == true && student.parentConsent == true && d.guardianId == d.studentId + '_parent'
-            && d.status in ['QUEUED', 'SENDING', 'SENT', 'DELIVERED', 'FAILED_RETRYABLE', 'FAILED_FINAL']
+            && d.status in ['QUEUED', 'SENDING', 'SENT', 'DELIVERED', 'FAILED_RETRYABLE', 'FAILED_FINAL', 'CANCELLED']
             && d.attemptCount is int && d.attemptCount >= 0 && d.attemptCount <= 8
             && nullableIso(d.sentAt) && nullableIso(d.deliveredAt) && (d.lastErrorCode == null || text(d.lastErrorCode, 120)) && d.updatedAt == request.time;
         }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ClipboardCheck,
+  BarChart3,
   CreditCard,
   Nfc,
   Send,
@@ -10,6 +11,7 @@ import {
 import { SchoolNfc } from "./native/plugin";
 import { LoginScreen } from "./screens/LoginScreen";
 import { DeviceScreen } from "./screens/DeviceScreen";
+import { DashboardScreen } from "./screens/DashboardScreen";
 import { RollCallScreen } from "./screens/RollCallScreen";
 import { ScannerScreen } from "./screens/ScannerScreen";
 import { CardManagerScreen } from "./screens/CardManagerScreen";
@@ -17,11 +19,13 @@ import { QueueScreen } from "./screens/QueueScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { useNativeState } from "./hooks/useNativeState";
 
-type Tab = "attendance" | "scanner" | "cards" | "queue" | "settings";
+type Tab =
+  "attendance" | "scanner" | "cards" | "dashboard" | "queue" | "settings";
 const tabs: Array<[Tab, string, LucideIcon]> = [
   ["attendance", "Roll call", ClipboardCheck],
   ["scanner", "NFC", Nfc],
   ["cards", "Cards", CreditCard],
+  ["dashboard", "Dashboard", BarChart3],
   ["queue", "Messages", Send],
   ["settings", "Settings", Settings],
 ];
@@ -94,6 +98,7 @@ export default function App() {
           <ScannerScreen device={device} queue={queue} lastScan={lastScan} />
         )}
         {tab === "cards" && <CardManagerScreen device={device} write={write} />}
+        {tab === "dashboard" && <DashboardScreen queue={queue} />}
         {tab === "queue" && <QueueScreen queue={queue} />}
         {tab === "settings" && (
           <SettingsScreen

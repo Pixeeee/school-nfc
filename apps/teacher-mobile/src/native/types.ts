@@ -8,6 +8,8 @@ export interface AuthState {
 export interface TeacherSmsProfile {
   username: string;
   schoolName: string;
+  attendanceTemplate?: string;
+  dismissalTemplate?: string;
 }
 export interface DeviceState {
   backend?: "SPARK" | "FUNCTIONS";
@@ -26,6 +28,8 @@ export interface DeviceState {
 export interface StudentSummary {
   id: string;
   displayName: string;
+  firstName?: string;
+  lastName?: string;
   studentNumber: string;
   sectionId: string;
   photoPath?: string;
@@ -91,7 +95,57 @@ export interface SubjectConfiguration {
   startTime: string;
   endTime: string;
 }
+export interface StudentDetails {
+  studentId: string;
+  sectionId: string;
+  studentNumber: string;
+  firstName: string;
+  lastName: string;
+  parentName: string;
+  parentPhone: string;
+  parentPhoneVerified: boolean;
+  parentConsent: boolean;
+}
+export interface ReportCounts {
+  onTime: number;
+  late: number;
+  absent: number;
+  recorded: number;
+}
+export interface TeacherReport {
+  month: string;
+  generatedAt: string;
+  totals: ReportCounts;
+  rows: Array<
+    ReportCounts & {
+      studentId: string;
+      studentNumber: string;
+      displayName: string;
+      lastName: string;
+      sectionId: string;
+      sectionName: string;
+      subjectId: string;
+      subjectName: string;
+    }
+  >;
+}
 export interface SchoolNfcPlugin {
+  getStudent(options: {
+    sectionId: string;
+    studentId: string;
+  }): Promise<{ student: StudentDetails }>;
+  updateStudent(
+    options: Omit<StudentDetails, "studentNumber">,
+  ): Promise<{ studentId: string }>;
+  deleteStudent(options: {
+    sectionId: string;
+    studentId: string;
+  }): Promise<{ studentId: string }>;
+  saveRosterOrder(options: {
+    sectionId: string;
+    studentIds: string[];
+  }): Promise<void>;
+  teacherReport(options: { month: string }): Promise<TeacherReport>;
   getTeacherProfile(): Promise<TeacherSmsProfile>;
   saveTeacherProfile(profile: TeacherSmsProfile): Promise<TeacherSmsProfile>;
   activeTeacherDirectory(): Promise<{ teachers: ActiveTeacher[] }>;
@@ -135,7 +189,11 @@ export interface SchoolNfcPlugin {
   listSectionStudents(options: {
     sectionId: string;
     subjectId?: string;
-  }): Promise<{ students: RosterStudent[]; localSchoolDate: string }>;
+  }): Promise<{
+    students: RosterStudent[];
+    localSchoolDate: string;
+    rosterOrder?: string[];
+  }>;
   markAbsent(options: {
     sectionId: string;
     studentId: string;

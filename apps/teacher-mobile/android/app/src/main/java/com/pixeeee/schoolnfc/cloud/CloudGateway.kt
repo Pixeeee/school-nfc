@@ -44,7 +44,7 @@ class CloudGateway(private val preferences: DevicePreferences) {
         val root = FirebaseFirestore.getInstance().collection("schools").document(schoolId)
         val profile = try {
             val saved = root.collection("teacherSmsProfiles").document(owner.uid).get(Source.SERVER).await()
-            if (saved.exists()) TeacherSmsProfile.validated(saved.getString("username").orEmpty(), saved.getString("schoolName").orEmpty())
+            if (saved.exists()) TeacherSmsProfile.validated(saved.getString("username").orEmpty(), saved.getString("schoolName").orEmpty(), saved.getString("attendanceTemplate").orEmpty(), saved.getString("dismissalTemplate").orEmpty())
             else {
                 val member = root.collection("members").document(owner.uid).get(Source.SERVER).await()
                 val school = root.get(Source.SERVER).await()
@@ -56,25 +56,25 @@ class CloudGateway(private val preferences: DevicePreferences) {
         }
         require(auth.currentUser?.uid == owner.uid && preferences.schoolId == schoolId) { "The signed-in teacher changed. Open Settings again." }
         preferences.cacheTeacherSmsProfile(owner.uid, profile, schoolId)
-        return mapOf("username" to profile.username, "schoolName" to profile.schoolName)
+        return profile.values()
     }
 
-    suspend fun saveTeacherProfile(username: String, schoolName: String): Map<String, Any?> {
+    suspend fun saveTeacherProfile(username: String, schoolName: String, attendanceTemplate: String = "", dismissalTemplate: String = ""): Map<String, Any?> {
         val owner = requireNotNull(auth.currentUser?.uid) { "Sign in first." }
         val schoolId = requireNotNull(preferences.schoolId) { "Sign in to your school first." }
-        val profile = TeacherSmsProfile.validated(username, schoolName)
+        val profile = TeacherSmsProfile.validated(username, schoolName, attendanceTemplate, dismissalTemplate)
         val db = FirebaseFirestore.getInstance()
         val ref = db.collection("schools").document(schoolId).collection("teacherSmsProfiles").document(owner)
         ref.get(Source.SERVER).await()
         // Transactions fail offline instead of leaving an unconfirmed profile write queued.
         db.runTransaction { tx ->
             tx.get(ref)
-            tx.set(ref, mapOf("username" to profile.username, "schoolName" to profile.schoolName, "updatedAt" to FieldValue.serverTimestamp()))
+            tx.set(ref, profile.values() + ("updatedAt" to FieldValue.serverTimestamp()))
             true
         }.await()
         require(auth.currentUser?.uid == owner && preferences.schoolId == schoolId) { "The signed-in teacher changed. Open Settings again." }
         preferences.cacheTeacherSmsProfile(owner, profile, schoolId)
-        return mapOf("username" to profile.username, "schoolName" to profile.schoolName)
+        return profile.values()
     }
 
     @Suppress("UNCHECKED_CAST")

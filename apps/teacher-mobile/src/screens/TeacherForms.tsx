@@ -133,44 +133,59 @@ export function SectionForm({
 export function StudentForm({
   sectionId,
   grade,
+  student,
   onSaved,
   onCancel,
 }: {
   sectionId: string;
   grade?: number;
+  student?: import("../native/types").StudentDetails;
   onSaved: (studentNumber?: string) => Promise<void>;
   onCancel: () => void;
 }) {
   const [requestId] = useState(() => crypto.randomUUID());
   const [classGrade, setClassGrade] = useState("");
   const [fields, setFields] = useState({
-    firstName: "",
-    lastName: "",
-    parentName: "",
-    parentPhone: "",
+    firstName: student?.firstName ?? "",
+    lastName: student?.lastName ?? "",
+    parentName: student?.parentName ?? "",
+    parentPhone: student?.parentPhone ?? "",
   });
-  const [verified, setVerified] = useState(false);
-  const [consent, setConsent] = useState(false);
+  const [verified, setVerified] = useState(
+    student?.parentPhoneVerified ?? false,
+  );
+  const [consent, setConsent] = useState(student?.parentConsent ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (grade == null && !classGrade) {
+    if (!student && grade == null && !classGrade) {
       setError("Choose the class grade to generate the student code.");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const result = await SchoolNfc.createStudent({
+      const contact = {
         ...fields,
-        requestId,
         sectionId,
-        ...(grade == null ? { grade: Number(classGrade) } : {}),
         parentPhoneVerified: verified,
         parentConsent: consent,
-      });
-      await onSaved(result.studentNumber);
+      };
+      if (student) {
+        await SchoolNfc.updateStudent({
+          ...contact,
+          studentId: student.studentId,
+        });
+        await onSaved(student.studentNumber);
+      } else {
+        const result = await SchoolNfc.createStudent({
+          ...contact,
+          requestId,
+          ...(grade == null ? { grade: Number(classGrade) } : {}),
+        });
+        await onSaved(result.studentNumber);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Student could not be saved.");
     } finally {
@@ -189,7 +204,13 @@ export function StudentForm({
           maxLength={80}
           inputMode={key === "parentPhone" ? "tel" : "text"}
           value={fields[key]}
-          onChange={(e) => setFields({ ...fields, [key]: e.target.value })}
+          onChange={(e) => {
+            setFields({ ...fields, [key]: e.target.value });
+            if (key === "parentPhone") {
+              setVerified(false);
+              setConsent(false);
+            }
+          }}
           placeholder={placeholder}
         />
       </Field>
@@ -197,11 +218,17 @@ export function StudentForm({
   }
   return (
     <section className="teacher-form" aria-labelledby="student-form-heading">
-      <h2 id="student-form-heading">Add student &amp; parent</h2>
+      <h2 id="student-form-heading">
+        {student ? "Edit student & parent" : "Add student & parent"}
+      </h2>
       {error && <Banner>{error}</Banner>}
       <form onSubmit={submit}>
-        <p>The student code is generated when you save.</p>
-        {grade == null && (
+        <p>
+          {student
+            ? `Student code: ${student.studentNumber}. Attendance history is preserved.`
+            : "The student code is generated when you save."}
+        </p>
+        {!student && grade == null && (
           <Field label="Class grade">
             <select
               required

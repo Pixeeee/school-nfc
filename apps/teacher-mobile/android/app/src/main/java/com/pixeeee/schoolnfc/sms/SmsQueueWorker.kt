@@ -23,6 +23,7 @@ class SmsQueueWorker(context: Context, params: WorkerParameters) : CoroutineWork
         if (!SmsAccess.permissionsGranted(applicationContext)) return Result.failure()
         if (!preferences.leaseValid(now)) return Result.failure()
         val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return Result.failure()
+        if (preferences.backend == "SPARK") database.smsOutbox().cancelSubjectQueue(uid, preferences.schoolId ?: return Result.failure())
         val subscriptionId = preferences.selectedSubscriptionId ?: return Result.success()
         // Pause setup failures without backing off the queue; selecting a SIM schedules fresh work.
         if (runCatching { SmsAccess.requireActiveSim(applicationContext, subscriptionId) }.isFailure) return Result.success()

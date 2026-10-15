@@ -83,6 +83,151 @@ describe.runIf(enabled)("portal real Firebase emulator integration", () => {
       projectId: "demo-school-portal",
     });
   });
+  it("edits and archives only owned roster records, preserving codes and history", async () => {
+    const studentId = randomUUID();
+    const fields = {
+      requestId: studentId,
+      sectionId: "teacherA",
+      studentNumber: "EDIT-001",
+      firstName: "Ada",
+      lastName: "De la Cruz",
+      parentName: "Demo Parent",
+      parentPhone: "09171234567",
+      parentPhoneVerified: true,
+      parentConsent: true,
+    };
+    expect((await call("studentCreate", fields)).code).toBe(200);
+    const changes = {
+      studentId,
+      sectionId: "teacherA",
+      firstName: "Zoe",
+      lastName: "De la Cruz",
+      parentName: "New Parent",
+      parentPhone: "09181234567",
+      parentPhoneVerified: true,
+      parentConsent: true,
+    };
+    expect((await call("studentUpdate", changes, "teacherB")).code).toBe(403);
+    expect(
+      (
+        await call(
+          "studentGet",
+          { studentId, sectionId: "teacherA" },
+          "teacherB",
+        )
+      ).code,
+    ).toBe(403);
+    expect((await call("studentUpdate", changes)).code).toBe(200);
+    const read = await call("studentGet", { studentId, sectionId: "teacherA" });
+    expect(read.body.student).toMatchObject({
+      firstName: "Zoe",
+      lastName: "De la Cruz",
+      studentNumber: "EDIT-001",
+      parentPhone: "+639181234567",
+    });
+    expect(
+      (await call("studentUpdate", { ...changes, parentPhone: "bad" })).code,
+    ).toBe(400);
+    expect(
+      (
+        await call(
+          "studentDelete",
+          { studentId, sectionId: "teacherA" },
+          "teacherB",
+        )
+      ).code,
+    ).toBe(403);
+    expect(
+      (await call("studentDelete", { studentId, sectionId: "teacherA" })).code,
+    ).toBe(200);
+    const saved = (
+      await db.doc(`${base}/sparkStudents/${studentId}`).get()
+    ).data();
+    expect(saved.status).toBe("ARCHIVED");
+    expect(saved.studentNumber).toBe("EDIT-001");
+    expect(
+      (await db.doc(`${base}/sparkStudentNumbers/EDIT-001`).get()).exists,
+    ).toBe(true);
+    expect(
+      (await call("studentDelete", { studentId, sectionId: "teacherA" })).code,
+    ).toBe(200);
+  });
+  it("monthly reports count latest statuses per day and subject, scoped to this teacher", async () => {
+    const month = "2026-09";
+    const records = [
+      [
+        "report1",
+        "teacherA",
+        "2026-09-02",
+        "2026-09-02T01:00:00Z",
+        "ABSENT",
+        "",
+      ],
+      [
+        "report2",
+        "teacherA",
+        "2026-09-02",
+        "2026-09-02T01:00:00.001Z",
+        "LATE",
+        "",
+      ],
+      [
+        "report3",
+        "teacherA",
+        "2026-09-02",
+        "2026-09-02T01:11:00Z",
+        "ON_TIME",
+        "math",
+      ],
+      [
+        "report4",
+        "teacherB",
+        "2026-09-02",
+        "2026-09-02T01:12:00Z",
+        "ABSENT",
+        "",
+      ],
+      [
+        "report5",
+        "teacherA",
+        "2026-10-02",
+        "2026-10-02T01:12:00Z",
+        "ABSENT",
+        "",
+      ],
+    ];
+    for (const [
+      id,
+      teacherId,
+      localSchoolDate,
+      localTimestamp,
+      attendanceTag,
+      subjectId,
+    ] of records)
+      await db.doc(`${base}/sparkAttendance/${id}`).set({
+        teacherId,
+        sectionId: "teacherA",
+        studentId: "reportStudent",
+        localSchoolDate,
+        localTimestamp,
+        attendanceTag,
+        subjectId,
+        eventType: attendanceTag === "ABSENT" ? "ABSENT" : "ARRIVAL",
+      });
+    const result = await call("teacherReport", { month });
+    expect(result.code).toBe(200);
+    expect(result.body.totals).toEqual({
+      onTime: 1,
+      late: 1,
+      absent: 0,
+      recorded: 2,
+    });
+    expect(result.body.rows).toHaveLength(2);
+    expect(
+      (await call("teacherReport", { month, teacherId: "teacherB" })).code,
+    ).toBe(400);
+    expect((await call("teacherReport", { month: "2026-13" })).code).toBe(400);
+  });
   afterAll(async () => {
     await db.recursiveDelete(db.doc(base));
     await deleteApp(app);

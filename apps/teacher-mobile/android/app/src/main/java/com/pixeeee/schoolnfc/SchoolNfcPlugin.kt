@@ -116,7 +116,7 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
 
     @PluginMethod fun getTeacherProfile(call: PluginCall) = launch(call) { resolve(call, cloud.getTeacherProfile()) }
     @PluginMethod fun saveTeacherProfile(call: PluginCall) = launch(call) {
-        resolve(call, cloud.saveTeacherProfile(required(call, "username"), required(call, "schoolName")))
+        resolve(call, cloud.saveTeacherProfile(required(call, "username"), required(call, "schoolName"), call.getString("attendanceTemplate") ?: "", call.getString("dismissalTemplate") ?: ""))
     }
 
     @PluginMethod fun registerDevice(call: PluginCall) = launch(call) {
@@ -242,6 +242,45 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
         resolve(call, result)
     }
 
+    @PluginMethod fun getStudent(call: PluginCall) = launch(call) {
+        resolve(call, cloud.call("studentGet", teacherContext() + listOf("sectionId", "studentId").associateWith { required(call, it) }))
+    }
+    @PluginMethod fun updateStudent(call: PluginCall) = launch(call) {
+        val fields = listOf("studentId", "sectionId", "firstName", "lastName", "parentName", "parentPhone").associateWith { required(call, it) }
+        val result = cloud.call("studentUpdate", teacherContext() + fields + mapOf("parentPhoneVerified" to (call.getBoolean("parentPhoneVerified") == true), "parentConsent" to (call.getBoolean("parentConsent") == true)))
+        preferences.snapshotOwner = null
+        database.smsOutbox().cancelStudentQueue(required(call, "studentId"), requireNotNull(cloud.currentUser()?.uid), requireNotNull(preferences.schoolId))
+        SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
+        resolve(call, result)
+    }
+    @PluginMethod fun deleteStudent(call: PluginCall) = launch(call) {
+        val studentId = required(call, "studentId")
+        val uid = requireNotNull(cloud.currentUser()?.uid)
+        val school = requireNotNull(preferences.schoolId)
+        if (database.attendance().pendingForStudent(studentId, uid, school, preferences.backend) > 0) {
+            QueueScheduler.scheduleSync(context)
+            error("Attendance is still syncing. Wait for synchronization to finish, then delete the student again.")
+        }
+        val result = cloud.call("studentDelete", teacherContext() + mapOf("sectionId" to required(call, "sectionId"), "studentId" to studentId))
+        preferences.snapshotOwner = null
+        database.smsOutbox().cancelStudentQueue(studentId, uid, school)
+        SnapshotSynchronizer(database, cloud, preferences, crypto).refreshAll()
+        resolve(call, result)
+    }
+    @PluginMethod fun saveRosterOrder(call: PluginCall) = launch(call) {
+        val sectionId = required(call, "sectionId")
+        require(preferences.cachedRosterValid() && sectionId in preferences.allowedSectionIds) { "Refresh your class first." }
+        val array = requireNotNull(call.getArray("studentIds")) { "Student order is required." }
+        val ids = (0 until array.length()).map { array.getString(it) }
+        val current = database.students().inSection(sectionId).map { it.id }.toSet()
+        require(ids.isEmpty() || (ids.size == current.size && ids.toSet() == current)) { "The roster changed. Refresh before saving its order." }
+        preferences.saveRosterOrder(sectionId, ids)
+        call.resolve()
+    }
+    @PluginMethod fun teacherReport(call: PluginCall) = launch(call) {
+        resolve(call, cloud.call("teacherReport", teacherContext() + mapOf("month" to required(call, "month"))))
+    }
+
     @PluginMethod fun listSectionStudents(call: PluginCall) = launch(call) {
         val sectionId = required(call, "sectionId")
         require(sectionId in preferences.allowedSectionIds && preferences.leaseValid()) { "Section authorization is missing or expired." }
@@ -259,17 +298,17 @@ class SchoolNfcPlugin : Plugin(), NfcCoordinator.Listener {
             val tag = if (server != null && (event == null || server["localTimestamp"].toString() > event.localTimestamp)) server["attendanceTag"]?.toString() ?: "UNMARKED" else event?.attendanceTag?.takeIf { it.isNotEmpty() } ?: event?.status ?: "UNMARKED"
             val statuses = event?.let { database.smsOutbox().statusesForEvent(it.eventUuid) } ?: emptyList()
             val smsStatus = when {
-                statuses.isEmpty() -> "NONE"
+                statuses.isEmpty() || statuses.all { it == "CANCELLED" } -> "NONE"
                 statuses.any { it == "FAILED_FINAL" || it == "FAILED_RETRYABLE" } -> "FAILED"
                 statuses.all { it == "DELIVERED" } -> "DELIVERED"
                 statuses.all { it == "SENT" || it == "DELIVERED" } -> "SENT"
                 else -> "QUEUED"
             }
             JSObject().put("id", student.id).put("displayName", student.displayName).put("studentNumber", student.studentNumber)
-                .put("sectionId", student.sectionId).put("present", tag in setOf("PRESENT", "ON_TIME", "LATE")).put("attendanceStatus", tag).put("smsStatus", smsStatus)
+                .put("firstName", student.firstName).put("lastName", student.lastName).put("sectionId", student.sectionId).put("present", tag in setOf("PRESENT", "ON_TIME", "LATE")).put("attendanceStatus", tag).put("smsStatus", smsStatus)
                 .put("syncStatus", event?.syncStatus)
         }
-        call.resolve(JSObject().put("students", JSArray(students)).put("localSchoolDate", date))
+        call.resolve(JSObject().put("students", JSArray(students)).put("rosterOrder", JSArray(preferences.rosterOrder(sectionId))).put("localSchoolDate", date))
     }
 
     @PluginMethod fun markPresent(call: PluginCall) = launch(call) {

@@ -8,9 +8,12 @@ import type {
   RosterStudent,
   SectionSummary,
   TeacherSetup,
+  StudentDetails,
 } from "../native/types";
 import { Banner, Button, Field } from "../components/Ui";
 import { SectionForm, StudentForm, SectionManagement } from "./TeacherForms";
+
+import { orderRoster } from "./rosterOrder";
 
 const smsLabels = {
   NONE: "No SMS queued",
@@ -28,6 +31,13 @@ export function RollCallScreen({
   queue: QueueSummary | null;
   onSettings: () => void;
 }) {
+  const formAnchor = useRef<HTMLDivElement>(null);
+  const [customOrder, setCustomOrder] = useState<string[]>([]);
+  const [orderDraft, setOrderDraft] = useState<string[] | null>(null);
+  const [editingStudent, setEditingStudent] = useState<StudentDetails | null>(
+    null,
+  );
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [sections, setSections] = useState<SectionSummary[]>([]);
   const [subjectId, setSubjectId] = useState("");
   const [classKind, setClassKind] = useState<ClassKind>("ADVISORY");
@@ -50,9 +60,16 @@ export function RollCallScreen({
   const [setup, setSetup] = useState<TeacherSetup | null>(null);
   const [students, setStudents] = useState<RosterStudent[]>([]);
   const [date, setDate] = useState("");
-  const [form, setForm] = useState<"section" | "student" | "management" | null>(
-    null,
-  );
+  const [form, setForm] = useState<
+    "section" | "student" | "edit" | "management" | null
+  >(null);
+  useEffect(() => {
+    if (form)
+      formAnchor.current?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "start",
+      });
+  }, [form]);
   const [loading, setLoading] = useState(true);
   const [busyStudent, setBusyStudent] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -116,6 +133,7 @@ export function RollCallScreen({
       view.current.subjectId === subjectId
     ) {
       setStudents(result.students);
+      setCustomOrder(result.rosterOrder ?? []);
       setDate(result.localSchoolDate);
     }
   }, [selected, subjectId]);
@@ -137,6 +155,7 @@ export function RollCallScreen({
           view.current.subjectId === subjectId
         ) {
           setStudents(result.students);
+          setCustomOrder(result.rosterOrder ?? []);
           setDate(result.localSchoolDate);
         }
       } catch (e) {
@@ -184,7 +203,7 @@ export function RollCallScreen({
       setNotice(
         result.status === "DUPLICATE"
           ? "Attendance already recorded today. No additional SMS queued."
-          : `${student.displayName} marked ${tag === "ABSENT" ? "absent" : tag === "LATE" ? "present late" : "present on time"}. ${result.smsQueued ?? 0} parent SMS queued.`,
+          : `${student.displayName} marked ${tag === "ABSENT" ? "absent" : tag === "LATE" ? "present late" : "present on time"}. ${subjectId ? "Subject attendance saved. No parent SMS sent." : `${result.smsQueued ?? 0} parent SMS queued.`}`,
       );
       await refreshRoster();
     } catch (e) {
@@ -195,13 +214,20 @@ export function RollCallScreen({
       setBusyStudent(null);
     }
   }
+  const orderedStudents = orderRoster(students, customOrder);
   const present = students.filter((s) => s.present).length;
   const section = sections.find((s) => s.id === selected);
   const subject = section?.subjects?.find((s) => s.id === subjectId);
   const isAdviser = section?.classKind !== "SUBJECT" && section?.isAdviser;
   const selectedStudent = students.find((s) => s.id === selectedStudentId);
-  const canMark =
-    (subjectId && subject?.isAssigned) || !section?.subjects?.length;
+  const canManageRoster =
+    section?.canManageRoster ??
+    section?.isAdviser ??
+    section?.classKind !== "SUBJECT";
+  const canMark = subjectId
+    ? subject?.isAssigned
+    : isAdviser ||
+      (!section?.subjects?.length && section?.classKind !== "SUBJECT");
   useEffect(() => {
     setSubjectId(
       section?.classKind === "SUBJECT" && section.subjects?.length === 1
@@ -209,6 +235,10 @@ export function RollCallScreen({
         : "",
     );
     setSelectedStudentId("");
+    setOrderDraft(null);
+    setDeleteConfirm(false);
+    setEditingStudent(null);
+    setForm(null);
     setHistory([]);
     setHistoryShown(false);
     setDismissal(null);
@@ -235,15 +265,16 @@ export function RollCallScreen({
           <ClipboardCheck />
         </div>
       </div>
-      {(!device.smsPermission || device.selectedSubscriptionId == null) && (
-        <Banner kind="info">
-          Set up SMS permission and your prepaid SIM before sending parent
-          texts.{" "}
-          <button className="text-button" onClick={onSettings}>
-            Open settings
-          </button>
-        </Banner>
-      )}
+      {!subjectId &&
+        (!device.smsPermission || device.selectedSubscriptionId == null) && (
+          <Banner kind="info">
+            Set up SMS permission and your prepaid SIM before sending parent
+            texts.{" "}
+            <button className="text-button" onClick={onSettings}>
+              Open settings
+            </button>
+          </Banner>
+        )}
       {setupError && (
         <Banner kind="info">
           {setupError}{" "}
@@ -304,6 +335,7 @@ export function RollCallScreen({
           <Plus /> Subject
         </Button>
       </section>
+      <div ref={formAnchor} style={{ scrollMarginTop: 80 }} />
       {isAdviser && device.backend === "SPARK" && (
         <Button
           variant="secondary"
@@ -331,12 +363,10 @@ export function RollCallScreen({
             <select
               value={subjectId}
               onChange={(e) => setSubjectId(e.target.value)}
-              disabled={busyStudent !== null}
+              disabled={busyStudent !== null || form !== null}
             >
               <option value="">
-                {section.subjects?.length
-                  ? "Choose a subject"
-                  : "Legacy section attendance"}
+                {isAdviser ? "Advisory attendance" : "Choose a subject"}
               </option>
               {section.subjects?.map((subject) => (
                 <option key={subject.id} value={subject.id}>
@@ -479,7 +509,7 @@ export function RollCallScreen({
                 </tr>
               </thead>
               <tbody>
-                {students.map((student) => (
+                {orderedStudents.map((student) => (
                   <tr key={student.id}>
                     <td>{student.displayName}</td>
                     {section.subjects?.map((subject) => {
@@ -519,9 +549,11 @@ export function RollCallScreen({
           }}
         />
       )}
-      {form === "student" && (
+      {(form === "student" || (form === "edit" && editingStudent)) && (
         <StudentForm
+          key={editingStudent?.studentId ?? "new-student"}
           sectionId={selected}
+          student={form === "edit" ? (editingStudent ?? undefined) : undefined}
           grade={section?.grade}
           onCancel={() => setForm(null)}
           onSaved={async (studentNumber) => {
@@ -610,12 +642,91 @@ export function RollCallScreen({
                         : ""
                     }
                   >
-                    {smsLabels[selectedStudent.smsStatus]}
+                    {subjectId
+                      ? "Subject attendance only · No SMS"
+                      : smsLabels[selectedStudent.smsStatus]}
                     {selectedStudent.syncStatus === "CONFLICT"
                       ? " · Sync conflict"
                       : ""}
                   </small>
                 </div>
+                {device.backend === "SPARK" && canManageRoster && (
+                  <div className="attendance-actions">
+                    <Button
+                      variant="secondary"
+                      disabled={busyStudent !== null || form !== null}
+                      onClick={() => {
+                        setBusyStudent(selectedStudent.id);
+                        setError("");
+                        setDeleteConfirm(false);
+                        void SchoolNfc.getStudent({
+                          sectionId: selected,
+                          studentId: selectedStudent.id,
+                        })
+                          .then((r) => {
+                            setEditingStudent(r.student);
+                            setForm("edit");
+                          })
+                          .catch((e) => setError(e.message))
+                          .finally(() => setBusyStudent(null));
+                      }}
+                    >
+                      Edit student
+                    </Button>
+                    <Button
+                      variant="danger"
+                      disabled={busyStudent !== null || form !== null}
+                      onClick={() => setDeleteConfirm(true)}
+                    >
+                      Delete student
+                    </Button>
+                  </div>
+                )}
+                {deleteConfirm && (
+                  <div
+                    role="alertdialog"
+                    aria-label="Confirm student deletion"
+                    className="delete-confirmation"
+                  >
+                    <p>
+                      Delete {selectedStudent.displayName} from this class
+                      roster? Past attendance and the student code are kept.
+                      Unsent texts on this phone are cancelled; texts already
+                      sending or sent cannot be recalled.
+                    </p>
+                    <Button
+                      variant="danger"
+                      busy={busyStudent !== null}
+                      onClick={() => {
+                        setBusyStudent(selectedStudent.id);
+                        setError("");
+                        void SchoolNfc.deleteStudent({
+                          sectionId: selected,
+                          studentId: selectedStudent.id,
+                        })
+                          .then(async () => {
+                            setDeleteConfirm(false);
+                            setSelectedStudentId("");
+                            await refreshRoster();
+                            setNotice(
+                              "Student removed from the roster. Attendance history preserved.",
+                            );
+                          })
+                          .catch((e) => setError(e.message))
+                          .finally(() => setBusyStudent(null));
+                      }}
+                    >
+                      Confirm delete
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={busyStudent !== null}
+                      onClick={() => setDeleteConfirm(false)}
+                    >
+                      Keep student
+                    </Button>
+                  </div>
+                )}
                 {canMark ? (
                   <div className="attendance-actions">
                     <Button
@@ -669,19 +780,141 @@ export function RollCallScreen({
               <p>Tap a student below to mark attendance.</p>
             )}
           </section>
+          <section className="roster-order" aria-label="Roster order">
+            <p>
+              {customOrder.length
+                ? "Custom order on this phone"
+                : "Alphabetical by surname (A–Z)"}
+            </p>
+            {device.backend === "SPARK" && (
+              <div className="form-actions">
+                <Button
+                  variant="secondary"
+                  disabled={
+                    form !== null || busyStudent !== null || orderDraft !== null
+                  }
+                  onClick={() =>
+                    setOrderDraft(orderedStudents.map((s) => s.id))
+                  }
+                >
+                  Customize order
+                </Button>
+                {customOrder.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    disabled={busyStudent !== null || orderDraft !== null}
+                    onClick={() => {
+                      setBusyStudent("ORDER");
+                      void SchoolNfc.saveRosterOrder({
+                        sectionId: selected,
+                        studentIds: [],
+                      })
+                        .then(() => setCustomOrder([]))
+                        .catch((e) => setError(e.message))
+                        .finally(() => setBusyStudent(null));
+                    }}
+                  >
+                    Reset to surname A–Z
+                  </Button>
+                )}
+              </div>
+            )}
+            {orderDraft && (
+              <div className="teacher-form">
+                <h3>Customize student order</h3>
+                <p>
+                  Use Up and Down, then save. This order is saved for this
+                  account and class on this phone.
+                </p>
+                {orderDraft.map((id, index) => (
+                  <div className="order-row" key={id}>
+                    <span>
+                      {index + 1}.{" "}
+                      {students.find((s) => s.id === id)?.displayName}
+                    </span>
+                    <button
+                      aria-label={`Move ${students.find((s) => s.id === id)?.displayName} up`}
+                      disabled={index === 0 || busyStudent !== null}
+                      onClick={() =>
+                        setOrderDraft((ids) => {
+                          const next = [...ids!];
+                          [next[index - 1], next[index]] = [
+                            next[index]!,
+                            next[index - 1]!,
+                          ];
+                          return next;
+                        })
+                      }
+                    >
+                      ↑
+                    </button>
+                    <button
+                      aria-label={`Move ${students.find((s) => s.id === id)?.displayName} down`}
+                      disabled={
+                        index === orderDraft.length - 1 || busyStudent !== null
+                      }
+                      onClick={() =>
+                        setOrderDraft((ids) => {
+                          const next = [...ids!];
+                          [next[index + 1], next[index]] = [
+                            next[index]!,
+                            next[index + 1]!,
+                          ];
+                          return next;
+                        })
+                      }
+                    >
+                      ↓
+                    </button>
+                  </div>
+                ))}
+                <div className="form-actions">
+                  <Button
+                    variant="secondary"
+                    disabled={busyStudent !== null}
+                    onClick={() => setOrderDraft(null)}
+                  >
+                    Cancel order
+                  </Button>
+                  <Button
+                    busy={busyStudent === "ORDER"}
+                    onClick={() => {
+                      setBusyStudent("ORDER");
+                      void SchoolNfc.saveRosterOrder({
+                        sectionId: selected,
+                        studentIds: orderDraft,
+                      })
+                        .then(() => {
+                          setCustomOrder(orderDraft);
+                          setOrderDraft(null);
+                          setNotice("Roster order saved.");
+                        })
+                        .catch((e) => setError(e.message))
+                        .finally(() => setBusyStudent(null));
+                    }}
+                  >
+                    Save order
+                  </Button>
+                </div>
+              </div>
+            )}
+          </section>
           <div
             className="roll-call-roster"
             role="group"
             aria-label="Student grid"
           >
-            {students.map((student) => (
+            {orderedStudents.map((student) => (
               <button
                 type="button"
                 key={student.id}
-                className={`student-tile ${student.present ? "is-present" : ""} ${student.attendanceStatus === "ABSENT" ? "is-absent" : ""} ${student.attendanceStatus === "LATE" ? "is-late" : ""}`}
+                className={`student-tile ${student.present ? "is-present" : ""} ${student.attendanceStatus === "ABSENT" ? "is-absent" : ""}`}
                 aria-pressed={selectedStudentId === student.id}
                 disabled={busyStudent !== null || form !== null}
-                onClick={() => setSelectedStudentId(student.id)}
+                onClick={() => {
+                  setSelectedStudentId(student.id);
+                  setDeleteConfirm(false);
+                }}
               >
                 <strong>{student.displayName}</strong>
                 <span>{student.studentNumber}</span>

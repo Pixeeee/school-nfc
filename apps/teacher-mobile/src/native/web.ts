@@ -12,6 +12,21 @@ import type {
 } from "./types";
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class SchoolNfcWeb extends WebPlugin implements SchoolNfcPlugin {
+  async getStudent(): Promise<{ student: import("./types").StudentDetails }> {
+    throw new Error("Student management requires the Android app.");
+  }
+  async updateStudent(): Promise<{ studentId: string }> {
+    throw new Error("Student management requires the Android app.");
+  }
+  async deleteStudent(): Promise<{ studentId: string }> {
+    throw new Error("Student management requires the Android app.");
+  }
+  async saveRosterOrder(): Promise<void> {
+    throw new Error("Roster ordering requires the Android app.");
+  }
+  async teacherReport(): Promise<import("./types").TeacherReport> {
+    throw new Error("Reports require the Android app and a connection.");
+  }
   async getTeacherProfile(): Promise<import("./types").TeacherSmsProfile> {
     throw new Error(
       "Teacher profiles require the Android app and a school account.",

@@ -4,6 +4,14 @@ import { SchoolNfc } from "../native/plugin";
 import type { DeviceState, SubscriptionInfo } from "../native/types";
 import { Banner, Button, Field } from "../components/Ui";
 
+import {
+  defaultAttendanceTemplate,
+  defaultDismissalTemplate,
+  messageTokens,
+  previewMessage,
+  templateError,
+} from "./messageTemplates";
+
 export function SettingsScreen({
   device,
   onLogout,
@@ -25,6 +33,8 @@ export function SettingsScreen({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [username, setUsername] = useState("");
+  const [attendanceTemplate, setAttendanceTemplate] = useState("");
+  const [dismissalTemplate, setDismissalTemplate] = useState("");
   const [schoolName, setSchoolName] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileBusy, setProfileBusy] = useState(false);
@@ -39,6 +49,8 @@ export function SettingsScreen({
         if (!cancelled) {
           setUsername(profile.username);
           setSchoolName(profile.schoolName);
+          setAttendanceTemplate(profile.attendanceTemplate ?? "");
+          setDismissalTemplate(profile.dismissalTemplate ?? "");
         }
       })
       .catch((e) => {
@@ -55,6 +67,12 @@ export function SettingsScreen({
     };
   }, []);
   async function saveProfile() {
+    const invalid =
+      templateError(attendanceTemplate) || templateError(dismissalTemplate);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
     setProfileBusy(true);
     setError("");
     setMessage("");
@@ -62,6 +80,8 @@ export function SettingsScreen({
       const profile = await SchoolNfc.saveTeacherProfile({
         username: username.trim(),
         schoolName: schoolName.trim(),
+        attendanceTemplate: attendanceTemplate.trim(),
+        dismissalTemplate: dismissalTemplate.trim(),
       });
       setUsername(profile.username);
       setSchoolName(profile.schoolName);
@@ -177,8 +197,9 @@ export function SettingsScreen({
         <div>
           <h2>Teacher profile</h2>
           <p>
-            Your username and school are included in new attendance, subject and
-            Out texts. This sets your SMS sender details.
+            Your username and school are included in new advisory attendance and
+            Out texts. Subject attendance does not send texts. This sets your
+            SMS sender details.
           </p>
           {profileLoading && <p role="status">Loading teacher profile…</p>}
           <form
@@ -207,6 +228,68 @@ export function SettingsScreen({
                 onChange={(e) => setSchoolName(e.target.value)}
               />
             </Field>
+            <details className="message-customization">
+              <summary>Customize parent messages</summary>
+              <p>
+                Edit the advisory attendance and Out messages. Blank fields
+                restore the standard message. Changes apply to new texts;
+                already queued texts keep their original wording.
+              </p>
+              <p className="message-tokens">
+                Placeholders:{" "}
+                {messageTokens.map((token) => `{{${token}}}`).join(" · ")}
+              </p>
+              <Field label="Attendance message">
+                <textarea
+                  rows={5}
+                  maxLength={600}
+                  value={attendanceTemplate}
+                  placeholder={defaultAttendanceTemplate}
+                  disabled={profileLoading || profileBusy}
+                  onChange={(e) => setAttendanceTemplate(e.target.value)}
+                />
+              </Field>
+              <Field label="Out message">
+                <textarea
+                  rows={5}
+                  maxLength={600}
+                  value={dismissalTemplate}
+                  placeholder={defaultDismissalTemplate}
+                  disabled={profileLoading || profileBusy}
+                  onChange={(e) => setDismissalTemplate(e.target.value)}
+                />
+              </Field>
+              <div className="message-preview" aria-label="Message preview">
+                <strong>Sample attendance message</strong>
+                <p>
+                  {schoolName || "Your school"}:{" "}
+                  {previewMessage(
+                    attendanceTemplate || defaultAttendanceTemplate,
+                  )}{" "}
+                  Teacher: {username || "Your username"}.
+                </p>
+                <strong>Sample Out message</strong>
+                <p>
+                  {schoolName || "Your school"}:{" "}
+                  {previewMessage(
+                    dismissalTemplate || defaultDismissalTemplate,
+                    "section dismissed",
+                  )}{" "}
+                  Teacher: {username || "Your username"}.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={profileLoading || profileBusy}
+                onClick={() => {
+                  setAttendanceTemplate("");
+                  setDismissalTemplate("");
+                }}
+              >
+                Use standard messages
+              </Button>
+            </details>
             <Button
               type="submit"
               busy={profileBusy}

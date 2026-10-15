@@ -61,9 +61,10 @@ class NativeAttendanceTest {
                 old.insertOrThrow(tableName, null, values)
             }
         }
+        old.execSQL("INSERT INTO students (id, studentNumber, displayName, sectionId, status, updatedAtEpochMs) VALUES ('kept_student', 'G10-OLD-001', 'Ada De la Cruz', 'old_section', 'ACTIVE', 1)")
         old.version = 1
         old.close()
-        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build()
+        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).build()
         try {
             assertEquals("NFC", upgraded.attendance().byUuid("preserved")!!.source)
             assertNotNull(upgraded.smsOutbox().byMessageId("preserved"))
@@ -72,6 +73,8 @@ class NativeAttendanceTest {
             assertEquals("FUNCTIONS", upgraded.attendance().byUuid("preserved")!!.backend)
             assertEquals("", upgraded.smsOutbox().byMessageId("preserved")!!.ownerUid)
             assertTrue(upgraded.sections().all().isEmpty())
+            assertEquals("G10-OLD-001", upgraded.students().byId("kept_student")!!.studentNumber)
+            assertEquals("", upgraded.students().byId("kept_student")!!.lastName)
         } finally { upgraded.close(); context.deleteDatabase(name) }
     }
 
@@ -139,13 +142,36 @@ class NativeAttendanceTest {
             val date = java.time.LocalDate.now(java.time.ZoneId.of(prefs.schoolTimeZone)).toString()
             assertEquals("LATE", database.attendance().latestSubject("test_school", "student_a", date, "math")!!.attendanceTag)
             assertEquals("ABSENT", database.attendance().latestSubject("test_school", "student_a", date, "science")!!.attendanceTag)
-            assertTrue(database.smsOutbox().dirtyForScope(100, "test_school", uid, prefs.backend).any { it.renderedMessage.contains("Math (08:00–09:00)") && it.renderedMessage.contains("present late") })
+            assertEquals(4, database.smsOutbox().dirtyForScope(100, "test_school", uid, prefs.backend).size)
+            assertEquals(0, database.attendance().latestSubject("test_school", "student_a", date, "math")!!.smsExpectedCount)
+            assertEquals(0, database.attendance().latestSubject("test_school", "student_a", date, "science")!!.smsExpectedCount)
+            prefs.cacheTeacherSmsProfile(uid, com.pixeeee.schoolnfc.attendance.TeacherSmsProfile.validated("sir_jade", "Nara School", "", "Dear parent, {{studentName}}: {{attendanceStatus}} on {{eventDate}} at {{eventTime}}. Section {{sectionName}}."))
             val dismissalTime = Instant.now().toString()
             assertEquals(1, repository.dismissSection("test_school", "section_a", dismissalTime, listOf("student_a")))
             // A fresh repository simulates restart after claiming/queueing. Out never queues another text.
             assertEquals(0, AttendanceRepository(context, database, prefs).dismissSection("test_school", "section_a", dismissalTime, listOf("student_a")))
             assertEquals(1, database.attendance().pending(100).count { it.eventType == "DISMISSAL" })
             assertTrue(database.smsOutbox().dirtyForScope(100, "test_school", uid, prefs.backend).any { it.renderedMessage.contains("section dismissed") })
+            assertTrue(database.smsOutbox().dirtyForScope(100, "test_school", uid, prefs.backend).any { it.renderedMessage.startsWith("Nara School: Dear parent, Juan Santos") && it.renderedMessage.endsWith("Teacher: sir_jade.") })
+            assertEquals(0, database.smsOutbox().cancelStudentQueue("student_a", "other_teacher", "test_school"))
+            assertEquals(5, database.smsOutbox().cancelStudentQueue("student_a", uid, "test_school"))
+            assertEquals(0, database.smsOutbox().pendingCount())
+            val oldSubjectEvent = database.attendance().latestSubject("test_school", "student_a", date, "math")!!
+            val sending = messages.first().copy(localId = 0, messageId = "old_subject", idempotencyKey = "OLD_SUBJECT", attendanceEventUuid = oldSubjectEvent.eventUuid, status = "SENDING", attemptCount = 1, updatedAtEpochMs = 1)
+            database.smsOutbox().insert(sending)
+            assertEquals(1, database.smsOutbox().cancelSubjectQueue(uid, "test_school"))
+            database.smsOutbox().markFailure("old_subject", "FAILED_RETRYABLE", "NO_SERVICE", "test", 0, System.currentTimeMillis())
+            assertEquals("CANCELLED", database.smsOutbox().byMessageId("old_subject")!!.status)
+            assertEquals(0, database.smsOutbox().retryAll(System.currentTimeMillis()))
+            assertEquals(0, database.smsOutbox().claim("old_subject", 1, 1, System.currentTimeMillis()))
+            database.smsOutbox().insert(sending.copy(messageId = "stale_subject", idempotencyKey = "STALE_SUBJECT"))
+            database.smsOutbox().cancelSubjectQueue(uid, "test_school")
+            database.smsOutbox().recoverStaleSending(System.currentTimeMillis(), 2)
+            assertEquals("CANCELLED", database.smsOutbox().byMessageId("stale_subject")!!.status)
+            // A real successful callback may still report a send already handed to the carrier.
+            database.smsOutbox().markPartSent("old_subject", Instant.now().toString(), System.currentTimeMillis())
+            assertEquals("SENT", database.smsOutbox().byMessageId("old_subject")!!.status)
+            assertNull(database.smsOutbox().nextReadyForScope(System.currentTimeMillis(), "test_school", uid, prefs.backend))
             val now = System.currentTimeMillis()
             database.smsOutbox().insert(SmsOutboxEntity(messageId = "test_message", idempotencyKey = "TEST|test_message", attendanceEventUuid = "not_an_event", guardianId = "TEST", encryptedPhone = "not_used", renderedMessage = "Test", subscriptionId = null, cloudDirty = false, createdAtEpochMs = now, updatedAtEpochMs = now))
             database.smsOutbox().markPartSent("test_message", Instant.now().toString(), now)

@@ -160,7 +160,7 @@ class AttendanceRepository(
         val template = if (source == "MANUAL") com.pixeeee.schoolnfc.database.SmsTemplateEntity(
             "manual_${session.mode.lowercase()}", session.mode, "Roll call notice", "{{schoolName}}: {{studentName}} ${if (session.mode == "DISMISSAL") "had their section dismissed" else if (attendanceTag == "LATE") "is present late" else if (session.mode == "ABSENT") "is absent" else "is present on time"}${if (subjectLabel.isNotEmpty()) " for $subjectLabel" else ""} on {{eventDate}}. Recorded at {{eventTime}}.", true
         ) else database.smsTemplates().byEventType(session.mode)
-        val eligibleRoutes = if (template?.enabled == true) routes else emptyList()
+        val eligibleRoutes = if (AttendancePolicy.shouldQueueSms(subjectId) && template?.enabled == true) routes else emptyList()
         val status = when (session.mode) { "ABSENT" -> "ABSENT"; "DISMISSAL" -> "DISMISSED"; else -> "PRESENT" }
         val event = AttendanceEventEntity(
             eventUuid = eventUuid, idempotencyKey = key, schoolId = session.schoolId, studentId = student.id, cardId = cardId, source = source, backend = preferences.backend,
@@ -175,7 +175,11 @@ class AttendanceRepository(
             if (template != null) {
                 for (route in eligibleRoutes) {
                     val messageId = UUID.randomUUID().toString()
-                    val body = render(template.body, mapOf(
+                    val customTemplate = if (session.mode == "DISMISSAL") profile?.dismissalTemplate else profile?.attendanceTemplate
+                    val body = TeacherSmsProfile.render(customTemplate?.takeIf { it.isNotBlank() } ?: template.body, mapOf(
+                        "studentCode" to student.studentNumber,
+                        "sectionName" to (database.sections().all().firstOrNull { it.id == student.sectionId }?.name ?: "Class"),
+                        "attendanceStatus" to (if (session.mode == "DISMISSAL") "section dismissed" else if (session.mode == "ABSENT") "absent" else if (attendanceTag == "LATE") "present late" else "present on time"),
                         "schoolName" to (profile?.schoolName ?: preferences.schoolName ?: "School"),
                         "studentName" to student.displayName,
                         "eventTime" to DateTimeFormatter.ofPattern("h:mm a").withZone(zone).format(Instant.ofEpochMilli(now)),
@@ -198,10 +202,6 @@ class AttendanceRepository(
             QueueScheduler.scheduleSync(context)
         }
         return ScanOutcome("ACCEPTED", timestamp, eventUuid, student.id, student.displayName, student.studentNumber, session.mode, null, eligibleRoutes.size, student.photoPath)
-    }
-
-    private fun render(template: String, values: Map<String, String>): String {
-        return Regex("\\{\\{\\s*(\\w+)\\s*\\}\\}").replace(template) { match -> values[match.groupValues[1]] ?: match.value }.trim()
     }
 
     private fun rejected(timestamp: String, reason: String) = ScanOutcome("REJECTED", timestamp, reason = reason)

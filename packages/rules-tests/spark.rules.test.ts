@@ -169,6 +169,26 @@ describe("Spark client trust boundaries", () => {
         updatedAt: serverTimestamp(),
       }),
     );
+    await assertSucceeds(
+      updateDoc(ref(db, "teacherSmsProfiles/teacherA"), {
+        attendanceTemplate:
+          "{{studentName}} {{attendanceStatus}} {{eventDate}} {{eventTime}}",
+        dismissalTemplate: "",
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(ref(db, "teacherSmsProfiles/teacherA"), {
+        attendanceTemplate: "x".repeat(601),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    await assertFails(
+      updateDoc(ref(dbFor("teacherB"), "teacherSmsProfiles/teacherA"), {
+        attendanceTemplate: "other",
+        updatedAt: serverTimestamp(),
+      }),
+    );
     await assertFails(
       getDoc(ref(dbFor("teacherB"), "teacherSmsProfiles/teacherA")),
     );

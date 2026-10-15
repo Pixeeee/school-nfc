@@ -21,6 +21,8 @@ data class StudentEntity(
     val photoPath: String? = null,
     val activeCardId: String? = null,
     val updatedAtEpochMs: Long = 0,
+    @ColumnInfo(defaultValue = "''") val firstName: String = "",
+    @ColumnInfo(defaultValue = "''") val lastName: String = "",
 )
 
 @Entity(tableName = "cards", indices = [Index(value = ["tokenHash"], unique = true), Index("studentId"), Index("status")])
@@ -130,6 +132,7 @@ data class SmsOutboxEntity(
     val renderedMessage: String,
     val subscriptionId: Int?,
     val status: String = "PENDING",
+    @ColumnInfo(defaultValue = "0") val cancelRequested: Boolean = false,
     val attemptCount: Int = 0,
     val nextAttemptAtEpochMs: Long = 0,
     val partCount: Int = 1,

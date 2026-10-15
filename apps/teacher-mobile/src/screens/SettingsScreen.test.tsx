@@ -175,6 +175,8 @@ it("loads this teacher's profile and saves both SMS sender details", async () =>
   expect(api.saveTeacherProfile).toHaveBeenCalledWith({
     username: "sir_jade",
     schoolName: "Acacia School",
+    attendanceTemplate: "",
+    dismissalTemplate: "",
   });
   expect(container.textContent).toContain("Teacher profile saved");
 });

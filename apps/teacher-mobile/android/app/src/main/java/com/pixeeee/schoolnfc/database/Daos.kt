@@ -61,6 +61,9 @@ interface AttendanceDao {
     @Query("SELECT * FROM attendance_events WHERE schoolId = :schoolId AND studentId = :studentId AND localSchoolDate = :date AND subjectId = :subjectId AND backend = 'SPARK' AND syncStatus != 'CONFLICT' ORDER BY createdAtEpochMs DESC, localId DESC LIMIT 1")
     suspend fun latestSubject(schoolId: String, studentId: String, date: String, subjectId: String): AttendanceEventEntity?
 
+    @Query("SELECT COUNT(*) FROM attendance_events WHERE studentId = :studentId AND teacherId = :uid AND schoolId = :schoolId AND backend = :backend AND syncStatus IN ('PENDING','RETRY')")
+    suspend fun pendingForStudent(studentId: String, uid: String, schoolId: String, backend: String): Int
+
     @Query("SELECT * FROM attendance_events WHERE idempotencyKey = :key LIMIT 1") suspend fun byIdempotencyKey(key: String): AttendanceEventEntity?
     @Query("SELECT * FROM attendance_events WHERE eventUuid = :uuid LIMIT 1") suspend fun byUuid(uuid: String): AttendanceEventEntity?
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(entity: AttendanceEventEntity): Long
@@ -74,29 +77,33 @@ interface AttendanceDao {
 
 @Dao
 interface SmsOutboxDao {
+    @Query("UPDATE sms_outbox SET cancelRequested = 1, status = CASE WHEN status = 'SENDING' THEN 'SENDING' ELSE 'CANCELLED' END, cloudDirty = 1 WHERE ownerUid = :uid AND status IN ('PENDING','READY','FAILED_RETRYABLE','SENDING') AND attendanceEventUuid IN (SELECT eventUuid FROM attendance_events WHERE studentId = :studentId AND schoolId = :schoolId)")
+    suspend fun cancelStudentQueue(studentId: String, uid: String, schoolId: String): Int
+    @Query("UPDATE sms_outbox SET cancelRequested = 1, status = CASE WHEN status = 'SENDING' THEN 'SENDING' ELSE 'CANCELLED' END, cloudDirty = 1 WHERE ownerUid = :uid AND status IN ('PENDING','READY','FAILED_RETRYABLE','SENDING') AND attendanceEventUuid IN (SELECT eventUuid FROM attendance_events WHERE subjectId != '' AND schoolId = :schoolId AND backend = 'SPARK')")
+    suspend fun cancelSubjectQueue(uid: String, schoolId: String): Int
     @Query("SELECT status FROM sms_outbox WHERE attendanceEventUuid = :eventUuid") suspend fun statusesForEvent(eventUuid: String): List<String>
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(entity: SmsOutboxEntity): Long
-    @Query("SELECT * FROM sms_outbox WHERE status IN ('PENDING','READY','FAILED_RETRYABLE') AND nextAttemptAtEpochMs <= :now ORDER BY createdAtEpochMs LIMIT 1") suspend fun nextReady(now: Long): SmsOutboxEntity?
-    @Query("SELECT * FROM sms_outbox WHERE ownerUid = :uid AND status IN ('PENDING','READY','FAILED_RETRYABLE') AND nextAttemptAtEpochMs <= :now AND (guardianId = 'TEST' OR EXISTS (SELECT 1 FROM attendance_events WHERE eventUuid = attendanceEventUuid AND schoolId = :schoolId AND teacherId = :uid AND backend = :backend)) ORDER BY createdAtEpochMs LIMIT 1")
+    @Query("SELECT * FROM sms_outbox WHERE cancelRequested = 0 AND status IN ('PENDING','READY','FAILED_RETRYABLE') AND nextAttemptAtEpochMs <= :now ORDER BY createdAtEpochMs LIMIT 1") suspend fun nextReady(now: Long): SmsOutboxEntity?
+    @Query("SELECT * FROM sms_outbox WHERE cancelRequested = 0 AND ownerUid = :uid AND status IN ('PENDING','READY','FAILED_RETRYABLE') AND nextAttemptAtEpochMs <= :now AND (guardianId = 'TEST' OR EXISTS (SELECT 1 FROM attendance_events WHERE eventUuid = attendanceEventUuid AND schoolId = :schoolId AND teacherId = :uid AND backend = :backend)) ORDER BY createdAtEpochMs LIMIT 1")
     suspend fun nextReadyForScope(now: Long, schoolId: String, uid: String, backend: String): SmsOutboxEntity?
     @Query("SELECT * FROM sms_outbox WHERE cloudDirty = 1 AND guardianId != 'TEST' AND ownerUid = :uid AND EXISTS (SELECT 1 FROM attendance_events WHERE eventUuid = attendanceEventUuid AND schoolId = :schoolId AND teacherId = :uid AND backend = :backend) ORDER BY updatedAtEpochMs LIMIT :limit")
     suspend fun dirtyForScope(limit: Int, schoolId: String, uid: String, backend: String): List<SmsOutboxEntity>
-    @Query("UPDATE sms_outbox SET status = 'SENDING', attemptCount = attemptCount + 1, partCount = :partCount, sentPartCount = 0, deliveredPartCount = 0, subscriptionId = :subscriptionId, updatedAtEpochMs = :now WHERE messageId = :messageId AND status IN ('PENDING','READY','FAILED_RETRYABLE')")
+    @Query("UPDATE sms_outbox SET status = 'SENDING', attemptCount = attemptCount + 1, partCount = :partCount, sentPartCount = 0, deliveredPartCount = 0, subscriptionId = :subscriptionId, updatedAtEpochMs = :now WHERE messageId = :messageId AND cancelRequested = 0 AND status IN ('PENDING','READY','FAILED_RETRYABLE')")
     suspend fun claim(messageId: String, partCount: Int, subscriptionId: Int, now: Long): Int
     @Query("SELECT * FROM sms_outbox WHERE messageId = :messageId LIMIT 1") suspend fun byMessageId(messageId: String): SmsOutboxEntity?
     @Query("UPDATE sms_outbox SET sentPartCount = sentPartCount + 1, status = CASE WHEN sentPartCount + 1 >= partCount THEN 'SENT' ELSE status END, sentAtIso = CASE WHEN sentPartCount + 1 >= partCount THEN :atIso ELSE sentAtIso END, cloudDirty = 1, updatedAtEpochMs = :now WHERE messageId = :messageId")
     suspend fun markPartSent(messageId: String, atIso: String, now: Long)
     @Query("UPDATE sms_outbox SET deliveredPartCount = deliveredPartCount + 1, status = CASE WHEN deliveredPartCount + 1 >= partCount THEN 'DELIVERED' ELSE status END, deliveredAtIso = CASE WHEN deliveredPartCount + 1 >= partCount THEN :atIso ELSE deliveredAtIso END, cloudDirty = 1, updatedAtEpochMs = :now WHERE messageId = :messageId")
     suspend fun markPartDelivered(messageId: String, atIso: String, now: Long)
-    @Query("UPDATE sms_outbox SET status = :status, lastErrorCode = :code, lastErrorMessage = :message, nextAttemptAtEpochMs = :nextAttempt, cloudDirty = 1, updatedAtEpochMs = :now WHERE messageId = :messageId")
+    @Query("UPDATE sms_outbox SET status = CASE WHEN cancelRequested = 1 THEN 'CANCELLED' ELSE :status END, lastErrorCode = :code, lastErrorMessage = :message, nextAttemptAtEpochMs = :nextAttempt, cloudDirty = 1, updatedAtEpochMs = :now WHERE messageId = :messageId")
     suspend fun markFailure(messageId: String, status: String, code: String, message: String, nextAttempt: Long, now: Long)
     @Query("SELECT * FROM sms_outbox WHERE cloudDirty = 1 AND guardianId != 'TEST' ORDER BY updatedAtEpochMs LIMIT :limit") suspend fun dirty(limit: Int): List<SmsOutboxEntity>
     @Query("UPDATE sms_outbox SET cloudDirty = 0 WHERE messageId IN (:messageIds)") suspend fun markClean(messageIds: List<String>)
-    @Query("UPDATE sms_outbox SET status = 'READY', nextAttemptAtEpochMs = 0, updatedAtEpochMs = :now WHERE status = 'FAILED_RETRYABLE'") suspend fun retryAll(now: Long): Int
+    @Query("UPDATE sms_outbox SET status = 'READY', nextAttemptAtEpochMs = 0, updatedAtEpochMs = :now WHERE cancelRequested = 0 AND status = 'FAILED_RETRYABLE'") suspend fun retryAll(now: Long): Int
     @Query("SELECT COUNT(*) FROM sms_outbox WHERE status IN ('PENDING','READY','SENDING')") suspend fun pendingCount(): Int
-    @Query("SELECT COUNT(*) FROM sms_outbox WHERE status = 'FAILED_RETRYABLE'") suspend fun retryCount(): Int
+    @Query("SELECT COUNT(*) FROM sms_outbox WHERE cancelRequested = 0 AND status = 'FAILED_RETRYABLE'") suspend fun retryCount(): Int
     @Query("SELECT COUNT(*) FROM sms_outbox WHERE status = 'FAILED_FINAL'") suspend fun failedCount(): Int
-    @Query("UPDATE sms_outbox SET status = 'FAILED_RETRYABLE', lastErrorCode = 'PROCESS_INTERRUPTED', nextAttemptAtEpochMs = :now, cloudDirty = 1, updatedAtEpochMs = :now WHERE status = 'SENDING' AND updatedAtEpochMs < :staleBefore")
+    @Query("UPDATE sms_outbox SET status = CASE WHEN cancelRequested = 1 THEN 'CANCELLED' ELSE 'FAILED_RETRYABLE' END, lastErrorCode = 'PROCESS_INTERRUPTED', nextAttemptAtEpochMs = :now, cloudDirty = 1, updatedAtEpochMs = :now WHERE status = 'SENDING' AND updatedAtEpochMs < :staleBefore")
     suspend fun recoverStaleSending(now: Long, staleBefore: Long): Int
 }
 

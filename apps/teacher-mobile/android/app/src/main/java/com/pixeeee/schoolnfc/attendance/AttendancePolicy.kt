@@ -1,6 +1,8 @@
 package com.pixeeee.schoolnfc.attendance
 
 object AttendancePolicy {
+    fun shouldQueueSms(subjectId: String): Boolean = subjectId.isEmpty()
+
     fun key(schoolId: String, studentId: String, localDate: String, eventType: String) = "$schoolId|$studentId|$localDate|$eventType"
 
     fun manualRejection(status: String, sectionId: String, allowedSections: Set<String>): String? = when {

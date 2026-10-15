@@ -63,7 +63,7 @@ class SnapshotSynchronizer(
 
     private fun student(m: Map<String, Any?>): StudentEntity? = runCatching { StudentEntity(
         id = m["id"].toString(), studentNumber = m["studentNumber"].toString(), displayName = m["displayName"].toString(),
-        sectionId = m["sectionId"].toString(), status = m["status"].toString(), photoPath = m["photoPath"]?.toString(), activeCardId = m["activeCardId"]?.toString(),
+        sectionId = m["sectionId"].toString(), status = m["status"].toString(), firstName = m["firstName"]?.toString().orEmpty(), lastName = m["lastName"]?.toString().orEmpty(), photoPath = m["photoPath"]?.toString(), activeCardId = m["activeCardId"]?.toString(),
     ) }.getOrNull()
 
     private fun card(m: Map<String, Any?>): CardEntity? = runCatching { CardEntity(

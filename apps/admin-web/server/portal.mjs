@@ -97,6 +97,35 @@ const schemas = {
       parentConsent: z.literal(true),
     })
     .strict(),
+  studentGet: z
+    .object({ action: z.literal("studentGet"), sectionId: id, studentId: id })
+    .strict(),
+  studentDelete: z
+    .object({
+      action: z.literal("studentDelete"),
+      sectionId: id,
+      studentId: id,
+    })
+    .strict(),
+  studentUpdate: z
+    .object({
+      action: z.literal("studentUpdate"),
+      sectionId: id,
+      studentId: id,
+      firstName: text(120),
+      lastName: text(120),
+      parentName: text(120),
+      parentPhone: text(30),
+      parentPhoneVerified: z.literal(true),
+      parentConsent: z.literal(true),
+    })
+    .strict(),
+  teacherReport: z
+    .object({
+      action: z.literal("teacherReport"),
+      month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+    })
+    .strict(),
   attendanceSet: z
     .object({
       action: z.literal("attendanceSet"),
@@ -136,6 +165,10 @@ const teacherActions = new Set([
   "subjectSet",
   "sectionCreate",
   "studentCreate",
+  "studentGet",
+  "studentUpdate",
+  "studentDelete",
+  "teacherReport",
   "attendanceSet",
   "deviceSet",
 ]);
@@ -812,6 +845,182 @@ export function createPortalHandler({
             studentId: ref.id,
             guardianId: `${ref.id}_parent`,
             studentNumber,
+          });
+        }
+        case "studentGet":
+        case "studentUpdate":
+        case "studentDelete": {
+          let parentPhone;
+          if (input.action === "studentUpdate") {
+            try {
+              parentPhone = normalizePhilippineMobile(input.parentPhone);
+            } catch {
+              throw new RequestError(
+                400,
+                "Enter a valid Philippine parent mobile number.",
+              );
+            }
+          }
+          const student = await db.runTransaction(async (tx) => {
+            await requireActiveTeacher(tx, uid);
+            const section = await tx.get(
+              db.doc(`${base}/sparkSections/${input.sectionId}`),
+            );
+            if (
+              !section.exists ||
+              !section.data().active ||
+              !canManageRoster(section.data(), uid)
+            )
+              throw new RequestError(
+                403,
+                "Only the class roster owner can manage students.",
+              );
+            const ref = db.doc(`${base}/sparkStudents/${input.studentId}`);
+            const saved = await tx.get(ref);
+            if (!saved.exists || saved.data().sectionId !== input.sectionId)
+              throw new RequestError(
+                404,
+                "Student was not found in this class.",
+              );
+            if (input.action === "studentDelete") {
+              tx.update(ref, {
+                status: "ARCHIVED",
+                archivedAt: FieldValue.serverTimestamp(),
+                updatedBy: uid,
+              });
+            } else if (input.action === "studentUpdate") {
+              if (saved.data().status !== "ACTIVE")
+                throw new RequestError(
+                  409,
+                  "This student has already been deleted from the roster.",
+                );
+              tx.update(ref, {
+                firstName: input.firstName,
+                lastName: input.lastName,
+                displayName: `${input.firstName} ${input.lastName}`,
+                parentName: input.parentName,
+                parentPhone,
+                parentPhoneVerified: true,
+                parentConsent: true,
+                updatedAt: FieldValue.serverTimestamp(),
+                updatedBy: uid,
+              });
+            }
+            const value = saved.data();
+            return {
+              studentId: ref.id,
+              sectionId: value.sectionId,
+              studentNumber: value.studentNumber,
+              firstName: value.firstName || "",
+              lastName: value.lastName || "",
+              parentName: value.parentName || "",
+              parentPhone: value.parentPhone || "",
+              parentPhoneVerified: value.parentPhoneVerified === true,
+              parentConsent: value.parentConsent === true,
+            };
+          });
+          return res.json(
+            input.action === "studentGet"
+              ? { student }
+              : { studentId: input.studentId },
+          );
+        }
+        case "teacherReport": {
+          const start = input.month + "-01";
+          const [year, month] = input.month.split("-").map(Number);
+          const end = `${month === 12 ? year + 1 : year}-${String(month === 12 ? 1 : month + 1).padStart(2, "0")}-01`;
+          const snapshot = await db
+            .collection(`${base}/sparkAttendance`)
+            .where("teacherId", "==", uid)
+            .where("localSchoolDate", ">=", start)
+            .where("localSchoolDate", "<", end)
+            .limit(20001)
+            .get();
+          if (snapshot.size > 20000)
+            throw new RequestError(
+              400,
+              "This month's report exceeds 20,000 attendance changes. Contact the administrator for an export.",
+            );
+          const latest = new Map();
+          for (const record of rows(snapshot)) {
+            if (!["ARRIVAL", "ABSENT"].includes(record.eventType)) continue;
+            const key = `${record.studentId}|${record.sectionId}|${record.subjectId || ""}|${record.localSchoolDate}`;
+            if (
+              !latest.has(key) ||
+              Date.parse(latest.get(key).localTimestamp) <
+                Date.parse(record.localTimestamp)
+            )
+              latest.set(key, record);
+          }
+          const documents = new Map();
+          const refs = [
+            ...new Set(
+              [...latest.values()].flatMap((x) => [
+                `sparkStudents/${x.studentId}`,
+                `sparkSections/${x.sectionId}`,
+                ...(x.subjectId ? [`sparkSubjects/${x.subjectId}`] : []),
+              ]),
+            ),
+          ];
+          for (let offset = 0; offset < refs.length; offset += 200) {
+            const chunk = refs.slice(offset, offset + 200);
+            const saved = await db.getAll(
+              ...chunk.map((path) => db.doc(`${base}/${path}`)),
+            );
+            saved.forEach((doc, i) =>
+              documents.set(chunk[i], doc.data() || {}),
+            );
+          }
+          const grouped = new Map();
+          const totals = { onTime: 0, late: 0, absent: 0, recorded: 0 };
+          for (const record of latest.values()) {
+            const status =
+              record.attendanceTag ||
+              (record.eventType === "ABSENT" ? "ABSENT" : "ON_TIME");
+            const metric =
+              status === "LATE"
+                ? "late"
+                : status === "ABSENT"
+                  ? "absent"
+                  : "onTime";
+            const key = `${record.studentId}|${record.sectionId}|${record.subjectId || ""}`;
+            if (!grouped.has(key)) {
+              const student =
+                documents.get(`sparkStudents/${record.studentId}`) || {};
+              const section =
+                documents.get(`sparkSections/${record.sectionId}`) || {};
+              const subject =
+                documents.get(`sparkSubjects/${record.subjectId}`) || {};
+              grouped.set(key, {
+                studentId: record.studentId,
+                studentNumber: student.studentNumber || "",
+                displayName: student.displayName || "Archived student",
+                lastName: student.lastName || "",
+                sectionId: record.sectionId,
+                sectionName: section.name || "Former class",
+                subjectId: record.subjectId || "",
+                subjectName: subject.name || "Advisory",
+                onTime: 0,
+                late: 0,
+                absent: 0,
+                recorded: 0,
+              });
+            }
+            const row = grouped.get(key);
+            row[metric]++;
+            row.recorded++;
+            totals[metric]++;
+            totals.recorded++;
+          }
+          return res.json({
+            month: input.month,
+            totals,
+            rows: [...grouped.values()].sort(
+              (a, b) =>
+                a.lastName.localeCompare(b.lastName) ||
+                a.displayName.localeCompare(b.displayName),
+            ),
+            generatedAt: new Date().toISOString(),
           });
         }
         case "studentList": {

@@ -74,8 +74,10 @@ service cloud.firestore {
         }
         allow get: if activeMember(schoolId) && member(schoolId).role in ['TEACHER', 'SCHOOL_ADMIN'] && uid == request.auth.uid;
         allow create, update: if activeMember(schoolId) && member(schoolId).role in ['TEACHER', 'SCHOOL_ADMIN'] && uid == request.auth.uid
-          && request.resource.data.keys().hasOnly(['username', 'schoolName', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['username', 'schoolName', 'attendanceTemplate', 'dismissalTemplate', 'updatedAt'])
           && identity(request.resource.data.username, 60) && identity(request.resource.data.schoolName, 100)
+          && request.resource.data.get('attendanceTemplate', '') is string && request.resource.data.get('attendanceTemplate', '').size() <= 600
+          && request.resource.data.get('dismissalTemplate', '') is string && request.resource.data.get('dismissalTemplate', '').size() <= 600
           && request.resource.data.updatedAt == request.time;
       }
 

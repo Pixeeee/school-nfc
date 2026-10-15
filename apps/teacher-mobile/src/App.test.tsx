@@ -6,6 +6,22 @@ import App from "./App";
 import type { TeacherSetup } from "./native/types";
 
 const api = vi.hoisted(() => ({
+  getStudent: vi.fn().mockResolvedValue({
+    student: {
+      studentId: "juan",
+      sectionId: "section_a",
+      studentNumber: "001",
+      firstName: "Juan",
+      lastName: "Santos",
+      parentName: "Demo Parent",
+      parentPhone: "+639171234567",
+      parentPhoneVerified: true,
+      parentConsent: true,
+    },
+  }),
+  updateStudent: vi.fn().mockResolvedValue({ studentId: "juan" }),
+  deleteStudent: vi.fn().mockResolvedValue({ studentId: "juan" }),
+  saveRosterOrder: vi.fn().mockResolvedValue(undefined),
   backend: "FUNCTIONS",
   status: "APPROVED",
   getAuthState: vi.fn().mockResolvedValue({ signedIn: true }),
@@ -88,7 +104,13 @@ describe("teacher app layout", () => {
     const labels = [...container.querySelectorAll("nav button")].map((b) =>
       b.textContent?.trim(),
     );
-    expect(labels).toEqual(["Roll call", "NFC", "Messages", "Settings"]);
+    expect(labels).toEqual([
+      "Roll call",
+      "NFC",
+      "Dashboard",
+      "Messages",
+      "Settings",
+    ]);
   });
   it("opens on roll call with the section roster", async () => {
     await render();
@@ -355,7 +377,7 @@ it("selects compact student tiles before marking and uses the subject class owne
   expect(api.markAbsent).not.toHaveBeenCalled();
 });
 
-it("keeps subject selection explicit for legacy advisory classes", async () => {
+it("keeps advisory attendance available before choosing a subject", async () => {
   api.backend = "SPARK";
   api.getTeacherSetup.mockResolvedValueOnce({
     sections: [
@@ -383,12 +405,12 @@ it("keeps subject selection explicit for legacy advisory classes", async () => {
   await act(async () =>
     (container.querySelector(".student-tile") as HTMLButtonElement).click(),
   );
-  expect(container.textContent).toContain("Choose an assigned subject");
+  expect(container.textContent).toContain("Advisory attendance");
   expect(
     [...container.querySelectorAll("button")].some(
       (b) => b.textContent === "On time",
     ),
-  ).toBe(false);
+  ).toBe(true);
 });
 
 it("marks the chosen tile instead of the first student and preserves selection on failure", async () => {
@@ -416,7 +438,10 @@ it("marks the chosen tile instead of the first student and preserves selection o
   api.markPresent.mockRejectedValueOnce(new Error("Save failed"));
   await render();
   const tiles = container.querySelectorAll<HTMLButtonElement>(".student-tile");
-  await act(async () => tiles[1]!.click());
+  const chosen = [...tiles].find((tile) =>
+    tile.textContent?.includes("Ana Reyes"),
+  )!;
+  await act(async () => chosen.click());
   expect(container.querySelector(".student-action-panel h3")?.textContent).toBe(
     "Ana Reyes",
   );
@@ -437,7 +462,7 @@ it("marks the chosen tile instead of the first student and preserves selection o
     tag: "ON_TIME",
   });
   expect(container.textContent).toContain("Save failed");
-  expect(tiles[1]!.getAttribute("aria-pressed")).toBe("true");
+  expect(chosen.getAttribute("aria-pressed")).toBe("true");
 });
 
 it("marks advisory late attendance without requiring a subject", async () => {
@@ -519,4 +544,107 @@ it("distinguishes subject classes with the same grade and section in the class c
     sectionId: "english",
     subjectId: "english",
   });
+});
+
+it("opens populated edit fields and confirms deletion before calling the native bridge", async () => {
+  api.backend = "SPARK";
+  await render();
+  await act(async () =>
+    (container.querySelector(".student-tile") as HTMLButtonElement).click(),
+  );
+  const button = (label: string) =>
+    [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === label,
+    )!;
+  await act(async () => button("Edit student").click());
+  expect(api.getStudent).toHaveBeenCalledWith({
+    sectionId: "section_a",
+    studentId: "juan",
+  });
+  expect(container.textContent).toContain("Edit student & parent");
+  expect(
+    [...container.querySelectorAll("input")].map((i) => i.value),
+  ).toContain("Santos");
+  await act(async () =>
+    container
+      .querySelector(".teacher-form form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+  );
+  expect(api.updateStudent).toHaveBeenCalledWith(
+    expect.objectContaining({
+      studentId: "juan",
+      firstName: "Juan",
+      lastName: "Santos",
+      parentPhoneVerified: true,
+      parentConsent: true,
+    }),
+  );
+  await act(async () => button("Delete student").click());
+  expect(api.deleteStudent).not.toHaveBeenCalled();
+  expect(
+    container.querySelector('[role="alertdialog"]')?.textContent,
+  ).toContain("Past attendance");
+  await act(async () => button("Keep student").click());
+  expect(api.deleteStudent).not.toHaveBeenCalled();
+  await act(async () => button("Delete student").click());
+  await act(async () => button("Confirm delete").click());
+  expect(api.deleteStudent).toHaveBeenCalledWith({
+    sectionId: "section_a",
+    studentId: "juan",
+  });
+  expect(container.textContent).toContain("Attendance history preserved");
+});
+it("saves a custom order and resets it to surname A–Z", async () => {
+  api.backend = "SPARK";
+  await render();
+  const button = (label: string) =>
+    [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === label,
+    )!;
+  expect(container.textContent).toContain("Alphabetical by surname");
+  await act(async () => button("Customize order").click());
+  await act(async () => button("Save order").click());
+  expect(api.saveRosterOrder).toHaveBeenLastCalledWith({
+    sectionId: "section_a",
+    studentIds: ["juan"],
+  });
+  expect(container.textContent).toContain("Custom order on this phone");
+  await act(async () => button("Reset to surname A–Z").click());
+  expect(api.saveRosterOrder).toHaveBeenLastCalledWith({
+    sectionId: "section_a",
+    studentIds: [],
+  });
+  expect(container.textContent).toContain("Alphabetical by surname");
+});
+it("keeps both on-time and late present tiles green", async () => {
+  api.listSectionStudents.mockResolvedValueOnce({
+    students: [
+      {
+        id: "a",
+        displayName: "A Cruz",
+        lastName: "Cruz",
+        studentNumber: "1",
+        sectionId: "section_a",
+        attendanceStatus: "ON_TIME",
+        present: true,
+        smsStatus: "NONE",
+      },
+      {
+        id: "b",
+        displayName: "B Santos",
+        lastName: "Santos",
+        studentNumber: "2",
+        sectionId: "section_a",
+        attendanceStatus: "LATE",
+        present: true,
+        smsStatus: "NONE",
+      },
+    ],
+    localSchoolDate: "2026-10-15",
+  });
+  await render();
+  expect(container.querySelectorAll(".student-tile.is-present")).toHaveLength(
+    2,
+  );
+  expect(container.querySelector(".student-tile.is-late")).toBeNull();
 });
